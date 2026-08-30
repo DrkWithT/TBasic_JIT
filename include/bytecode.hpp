@@ -42,7 +42,7 @@ namespace toyjit::runtime {
     };
 
     struct Profs {
-        static constexpr std::int32_t min_heat_to_jit = 200;
+        static constexpr std::int32_t min_heat_to_jit = 129;
         static constexpr std::int32_t dead_num = -1;
 
         std::int32_t heat {dead_num};      // IF <= `dead_heat_no_jit`, treat the corresponding chunk as non-JITable.
@@ -57,8 +57,9 @@ namespace toyjit::runtime {
 
     struct VM;
 
-    // ? Holds a native function that is used by the JIT for complex, hard-to-compile operations e.g indexing a list. See README.
-    using HelperFn = void(*)(VM* vm, Value* dest, Value* a1);
+    // ? Holds a native function that is used by the JIT for complex, hard-to-compile operations e.g indexing a list. a1 is for native side arguments. xa is for the optional extra arguments.
+    // ? Parameter Regs: rdi, rsi, rdx, rcx
+    using HelperFn = void(*)(VM* vm, Value* dest, Value* a1, Value* xa);
 
     // ? Interfaces with a piece of JITed or user-written native code. See README for usage and conventions.
     using StubFn = Value(*)(VM* vm, Value* locals, const Value* cvp, const HelperFn* helpers);
@@ -78,13 +79,13 @@ namespace toyjit::runtime {
     enum class HelperID : std::int32_t {
         add_gen,
         sub_gen,
-        // mul_gen,
-        // div_gen,
+        // mul_gen, // todo
+        // div_gen, // todo
         eq_gen,
         ne_gen,
         lt_gen,
         gt_gen,
-        // invoke_with_n,
+        invoke_cid,
         last
     };
 }
