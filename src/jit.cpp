@@ -49,6 +49,10 @@ namespace toyjit::runtime {
         m_as.push(x86::regs::rbp);
         // mov rbp, rsp
         m_as.mov(x86::regs::rbp, x86::regs::rsp);
+        // ! Here, preserve copies of the parameters' register data for this NativeFn stub: VM* vm, Value* locals, const Value* cvp, const HelperFn* helpers are RDI, RSI, RDX, RCX. RDI is left the same anyways.
+        m_as.push(x86::regs::rsi);
+        m_as.push(x86::regs::rdx);
+        m_as.push(x86::regs::rcx);
     }
 
     [[nodiscard]]
@@ -82,7 +86,7 @@ namespace toyjit::runtime {
         } else {
             const auto non_arg_local_offset = local_offset - m_argc;
 
-            m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rbp, -non_arg_local_offset * value_size));
+            m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rbp, -(non_arg_local_offset + 5) * value_size)); // ! IMPORTANT: Use RBP + 5 to start the native non-arg locals above the 4 preserved parameters.
         }
 
         // mov [rsp], r8
@@ -108,7 +112,7 @@ namespace toyjit::runtime {
             const auto non_arg_local_offset = local_offset - m_argc;
 
             // mov [rbp + (-non_arg_local_offset) * 8], r8
-            m_as.mov(x86::ptr(x86::regs::rbp, -non_arg_local_offset * value_size), x86::regs::r8);
+            m_as.mov(x86::ptr(x86::regs::rbp, -(non_arg_local_offset + 5) * value_size), x86::regs::r8);
         }
 
         return true;
@@ -165,12 +169,8 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_add(Inst i) {
-        // ! NOTE: call generic addition helper here, as this JIT is too naive to know if all possible temporaries are of the same type from the bytecode instructions alone.
+        // ! NOTE: call generic helper here, as this JIT is too naive to know if all possible temporaries are of the same type from the bytecode instructions alone.
         const auto helper_id = std::to_underlying(HelperID::add_gen);
-
-        // ; Register rsi is the same (VM* vm), but save RSI, RDX to preserve the arg-local ptr and cvp ptr
-        m_as.push(x86::regs::rsi);
-        m_as.push(x86::regs::rdx);
 
         // ; store `Value* target` (dest)
         // mov r8, rsp
@@ -193,9 +193,10 @@ namespace toyjit::runtime {
         // call r9
         m_as.call(x86::regs::r9);
 
-        // ; restore this callee's arg-local ptr and cvp ptr in RSI, RDX respectively
-        m_as.pop(x86::regs::rdx);
-        m_as.pop(x86::regs::rsi);
+        // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -203,12 +204,7 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_sub(Inst i) {
-        // ! NOTE: call generic subtraction helper here, as this JIT is too naive to know if all possible temporaries are of the same type from the bytecode instructions alone.
         const auto helper_id = std::to_underlying(HelperID::sub_gen);
-
-        // ; Register rsi is the same (VM* vm), but save RSI, RDX to preserve the arg-local ptr and cvp ptr
-        m_as.push(x86::regs::rsi);
-        m_as.push(x86::regs::rdx);
 
         // ; store `Value* target` (dest)
         // mov r8, rsp
@@ -231,9 +227,10 @@ namespace toyjit::runtime {
         // call r9
         m_as.call(x86::regs::r9);
 
-        // ; restore this callee's arg-local ptr and cvp ptr in RSI, RDX respectively
-        m_as.pop(x86::regs::rdx);
-        m_as.pop(x86::regs::rsi);
+        // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -241,12 +238,7 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_eq(Inst i) {
-        // ! NOTE: call generic addition helper here, as this JIT is too naive to know if all possible temporaries are of the same type from the bytecode instructions alone.
         const auto helper_id = std::to_underlying(HelperID::eq_gen);
-
-        // ; Register rsi is the same (VM* vm), but save RSI, RDX to preserve the arg-local ptr and cvp ptr
-        m_as.push(x86::regs::rsi);
-        m_as.push(x86::regs::rdx);
 
         // ; store `Value* target` (dest)
         // mov r8, rsp
@@ -269,9 +261,10 @@ namespace toyjit::runtime {
         // call r9
         m_as.call(x86::regs::r9);
 
-        // ; restore this callee's arg-local ptr and cvp ptr in RSI, RDX respectively
-        m_as.pop(x86::regs::rdx);
-        m_as.pop(x86::regs::rsi);
+        // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -279,13 +272,9 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_ne(Inst i) {
-        // ! NOTE: call generic addition helper here, as this JIT is too naive to know if all possible temporaries are of the same type from the bytecode instructions alone.
         const auto helper_id = std::to_underlying(HelperID::ne_gen);
 
-        // ; Register rsi is the same (VM* vm), but save RSI, RDX to preserve the arg-local ptr and cvp ptr
-        m_as.push(x86::regs::rsi);
-        m_as.push(x86::regs::rdx);
-
+        // ; Register rdi is the same (VM* vm), but save RSI, RDX to preserve the arg-local ptr and cvp ptr
         // ; store `Value* target` (dest)
         // mov r8, rsp
         m_as.mov(x86::regs::r8, x86::regs::rsp);
@@ -307,9 +296,10 @@ namespace toyjit::runtime {
         // call r9
         m_as.call(x86::regs::r9);
 
-        // ; restore this callee's arg-local ptr and cvp ptr in RSI, RDX respectively
-        m_as.pop(x86::regs::rdx);
-        m_as.pop(x86::regs::rsi);
+        // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -317,12 +307,7 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_lt(Inst i) {
-        // ! NOTE: call generic addition helper here, as this JIT is too naive to know if all possible temporaries are of the same type from the bytecode instructions alone.
         const auto helper_id = std::to_underlying(HelperID::lt_gen);
-
-        // ; Register rsi is the same (VM* vm), but save RSI, RDX to preserve the arg-local ptr and cvp ptr
-        m_as.push(x86::regs::rsi);
-        m_as.push(x86::regs::rdx);
 
         // ; store `Value* target` (dest)
         // mov r8, rsp
@@ -345,9 +330,10 @@ namespace toyjit::runtime {
         // call r9
         m_as.call(x86::regs::r9);
 
-        // ; restore this callee's arg-local ptr and cvp ptr in RSI, RDX respectively
-        m_as.pop(x86::regs::rdx);
-        m_as.pop(x86::regs::rsi);
+        // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -355,12 +341,7 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_gt(Inst i) {
-        // ! NOTE: call generic addition helper here, as this JIT is too naive to know if all possible temporaries are of the same type from the bytecode instructions alone.
         const auto helper_id = std::to_underlying(HelperID::gt_gen);
-
-        // ; Register rsi is the same (VM* vm), but save RSI, RDX to preserve the arg-local ptr and cvp ptr
-        m_as.push(x86::regs::rsi);
-        m_as.push(x86::regs::rdx);
 
         // ; store `Value* target` (dest)
         // mov r8, rsp
@@ -383,9 +364,10 @@ namespace toyjit::runtime {
         // call r9
         m_as.call(x86::regs::r9);
 
-        // ; restore this callee's arg-local ptr and cvp ptr in RSI, RDX respectively
-        m_as.pop(x86::regs::rdx);
-        m_as.pop(x86::regs::rsi);
+        // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -394,7 +376,7 @@ namespace toyjit::runtime {
     [[nodiscard]]
     bool JIT::emit_jump_else([[maybe_unused]] Inst i) {
         // ; Check if <temp>.data.byte is not zero, popping it and jumping to an unresolved label if so.
-        m_as.mov(x86::regs::r8d, x86::ptr(x86::regs::rsp, value_union_size));
+        m_as.mov(x86::regs::r8d, x86::ptr(x86::regs::rsp, 0));
 
         m_as.add(x86::regs::rsp, value_size);
 
@@ -443,8 +425,69 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_call(Inst i) {
-        std::cerr << "JIT of VM call is unsupported :(\n";
-        return false; // todo: JIT code should push N args to the VM stack and run a call_chunk_gen() helper on those args... 
+        const auto helper_id = std::to_underlying(HelperID::invoke_cid);
+        const std::int32_t callee_chunk_id = i.w;
+        const std::int32_t callee_argc = i.s;
+
+        // ? Form a pointer to N Values to feed the helper via `Value* a1`.
+        m_as.mov(x86::regs::r9, x86::regs::rsp);
+        if (callee_argc > 0) {
+            m_as.add(x86::regs::r9, value_size * (callee_argc - 1));
+        }
+
+        // ! Here, store `Value* target` (dest) which is equal to `Value* a1` in this specifc case since the invoke_cid helper needs N natively-passed args to push onto the VM stack for the cid's trampoline call with arg-locals.
+        // mov rsi, r9
+        m_as.mov(x86::regs::rsi, x86::regs::r9);
+        // mov rdx, r9
+        m_as.mov(x86::regs::rdx, x86::regs::r9);
+
+        // ! Here, store a Value[2] behind `Value* xa` (src) Value ptr: chunk-ID and argc.
+        // ! BUT, the stack is LIFO and grows lower, so push argc before chunk-ID for the helper, allowing chunk-ID to reside in xa[0].
+        // mov BYTE PTR [rsp], 2     ; put Value {.data.n = <argc>, .tag = VTag::v_i32}
+        m_as.mov(x86::regs::r8, 2);
+        m_as.sub(x86::regs::rsp, value_union_size);
+        m_as.mov(x86::regs::ptr(x86::regs::rsp, 0), x86::regs::r8b);
+        // ; mov DWORD PTR [rsp], <argc>
+        m_as.mov(x86::regs::r8, callee_argc);
+        m_as.sub(x86::regs::rsp, value_union_size);
+        m_as.mov(x86::regs::ptr(x86::regs::rsp, 0), x86::regs::r8d);
+
+        // mov BYTE PTR [rsp], 2     ; put Value {.data.n = <chunk-ID>, .tag = VTag::v_i32}
+        m_as.mov(x86::regs::r8, 2);
+        m_as.sub(x86::regs::rsp, value_union_size);
+        m_as.mov(x86::regs::ptr(x86::regs::rsp, 0), x86::regs::r8b);
+        // ; mov DWORD PTR [rsp], <chunk-ID>
+        m_as.mov(x86::regs::r8, callee_chunk_id);
+        m_as.sub(x86::regs::rsp, value_union_size);
+        m_as.mov(x86::regs::ptr(x86::regs::rsp, 0), x86::regs::r8d);
+
+        // ! Here, prepare `Value* xa` of Value[2].
+        // mov r9, rcx
+        m_as.mov(x86::regs::r9, x86::regs::rcx); // ? Copy RCX ptr to helper functions ptr.
+        // mov rcx, rsp
+        m_as.mov(x86::regs::rcx, x86::regs::rsp);
+
+        // ; call helper on these arguments...
+        // mov r9, [r9 + helper_id * 8]
+        m_as.mov(x86::regs::r9, x86::ptr(x86::regs::r9, helper_id * ptr_size));
+
+        // ! Here, the invoke_cid() helper must take the chunk-ID and argc to properly call the chunk, 
+        // call r9
+        m_as.call(x86::regs::r9);
+
+        // ! Here, remove the used temporaries behind `Value* a1`.
+        m_as.add(x86::regs::rsp, 2 * value_size);
+
+        if (callee_argc > 0) {
+            m_as.add(x86::regs::rsp, value_size * (callee_argc - 1));
+        }
+
+        // ! Here, restore the native stub's original arguments.
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
+
+        return true; 
     }
 
     [[nodiscard]]
@@ -536,11 +579,11 @@ namespace toyjit::runtime {
             return false;
         }
 
-        if (const auto child_falsy = block->right_child; m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
         }
 
@@ -555,11 +598,11 @@ namespace toyjit::runtime {
             return false;
         }
 
-        if (const auto child_falsy = block->right_child; m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
         }
 
@@ -574,11 +617,11 @@ namespace toyjit::runtime {
 
         m_flows.pop_back();
 
-        if (const auto child_falsy = block->right_child; m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
         }
 
@@ -593,11 +636,11 @@ namespace toyjit::runtime {
 
         // m_as.jump(std::get<JIT::Ifs>(m_flows.back).end_fbody_label); // ! Handle via emit_jump...
 
-        if (const auto child_falsy = block->right_child; m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
         }
 
@@ -614,11 +657,11 @@ namespace toyjit::runtime {
 
         m_as.bind(std::get<JIT::Ifs>(m_flows.back()).end_fbody_label);
 
-        if (const auto child_falsy = block->right_child; m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
         }
 
@@ -637,11 +680,11 @@ namespace toyjit::runtime {
             return false;
         }
 
-        if (const auto child_falsy = block->right_child; m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
         }
 
@@ -650,12 +693,12 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_loop_ender(const compiler::BB* block) {
+        m_as.bind(std::get<JIT::Loop>(m_flows.back()).exit_loop_label);
+        m_flows.pop_back();
+
         if (!emit_instructions(block->data, block->n)) {
             return false;
         }
-
-        m_as.bind(std::get<JIT::Loop>(m_flows.back()).exit_loop_label);
-        m_flows.pop_back();
 
         if (const auto child_falsy = block->right_child; m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
