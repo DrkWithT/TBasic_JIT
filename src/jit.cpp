@@ -76,9 +76,6 @@ namespace toyjit::runtime {
         // ! The raw offset here is actually relative to stack[CALLEE_BP] where local 0 is. This means that the stub should offset directly from `locals` which points back to `stack[CALLEE_BP]`.
         const auto local_offset = i.w;
 
-        // sub rsp, 8
-        m_as.sub(x86::regs::rsp, value_size);
-
         // ! Handle case of argument locals (Locals 0 to ARGC - 1).
         if (local_offset < m_argc) {
             // mov r8, [rsi + local_offset * 8] ... Base.Index.Scale
@@ -89,8 +86,8 @@ namespace toyjit::runtime {
             m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rbp, -(non_arg_local_offset + 5) * value_size)); // ! IMPORTANT: Use RBP + 5 to start the native non-arg locals above the 4 preserved parameters.
         }
 
-        // mov [rsp], r8
-        m_as.mov(x86::ptr(x86::regs::rsp), x86::regs::r8);
+        // push r8
+        m_as.push(x86::regs::r8);
 
         return true;
     }
@@ -99,11 +96,8 @@ namespace toyjit::runtime {
     bool JIT::emit_set_local(Inst i) {
         const auto local_offset = i.w;
 
-        // mov r8, [rsp]
-        m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rsp, 0));
-
-        // add rsp, 8
-        m_as.add(x86::regs::rsp, value_size);
+        // pop r8
+        m_as.pop(x86::regs::r8);
 
         if (local_offset < m_argc) {
             // mov [rsi + local_offset * 8], r8 ... Base.Index.Scale
@@ -124,10 +118,8 @@ namespace toyjit::runtime {
 
         // mov r8, [rdx + konst_offset * 8] ... Base.Index.Scale
         m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rdx, konst_offset * value_size));
-        // sub rsp, 8
-        m_as.sub(x86::regs::rsp, value_size);
-        // mov [rsp], r8
-        m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8);
+        // push r8
+        m_as.push(x86::regs::r8);
 
         return true;
     }
@@ -137,11 +129,8 @@ namespace toyjit::runtime {
         // mov r8, [rsp]
         m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rsp, 0));
 
-        // sub rsp, 8
-        m_as.sub(x86::regs::rsp, value_size);
-
-        // mov [rsp], r8
-        m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8);
+        // push r8
+        m_as.push(x86::regs::r8);
 
         return true;
     }
@@ -173,14 +162,8 @@ namespace toyjit::runtime {
         const auto helper_id = std::to_underlying(HelperID::add_gen);
 
         // ; store `Value* target` (dest)
-        // mov r8, rsp
-        m_as.mov(x86::regs::r8, x86::regs::rsp);
-
-        // add r8, 8
-        m_as.add(x86::regs::r8, value_size);
-
-        // mov rsi, r8
-        m_as.mov(x86::regs::rsi, x86::regs::r8);
+        // lea rsi, [rsp + 8]
+        m_as.lea(x86::regs::rsi, x86::ptr(x86::regs::rsp, value_size));
 
         // ; store `Value* a1` (src) Value ptr
         // mov rdx, rsp
@@ -208,14 +191,8 @@ namespace toyjit::runtime {
         const auto helper_id = std::to_underlying(HelperID::sub_gen);
 
         // ; store `Value* target` (dest)
-        // mov r8, rsp
-        m_as.mov(x86::regs::r8, x86::regs::rsp);
-
-        // add r8, 8
-        m_as.add(x86::regs::r8, value_size);
-
-        // mov rsi, r8
-        m_as.mov(x86::regs::rsi, x86::regs::r8);
+        // lea rsi, [rsp + 8]
+        m_as.lea(x86::regs::rsi, x86::ptr(x86::regs::rsp, value_size));
 
         // ; store `Value* a1` (src) Value ptr
         // mov rdx, rsp
@@ -243,14 +220,8 @@ namespace toyjit::runtime {
         const auto helper_id = std::to_underlying(HelperID::eq_gen);
 
         // ; store `Value* target` (dest)
-        // mov r8, rsp
-        m_as.mov(x86::regs::r8, x86::regs::rsp);
-
-        // add r8, 8
-        m_as.add(x86::regs::r8, value_size);
-
-        // mov rsi, r8
-        m_as.mov(x86::regs::rsi, x86::regs::r8);
+        // lea rsi, [rsp + 8]
+        m_as.lea(x86::regs::rsi, x86::ptr(x86::regs::rsp, value_size));
 
         // ; store `Value* a1` (src) Value ptr
         // mov rdx, rsp
@@ -279,14 +250,8 @@ namespace toyjit::runtime {
 
         // ; Register rdi is the same (VM* vm), but save RSI, RDX to preserve the arg-local ptr and cvp ptr
         // ; store `Value* target` (dest)
-        // mov r8, rsp
-        m_as.mov(x86::regs::r8, x86::regs::rsp);
-
-        // add r8, 8
-        m_as.add(x86::regs::r8, value_size);
-
-        // mov rsi, r8
-        m_as.mov(x86::regs::rsi, x86::regs::r8);
+        // lea rsi, [rsp + 8]
+        m_as.lea(x86::regs::rsi, x86::ptr(x86::regs::rsp, value_size));
 
         // ; store `Value* a1` (src) Value ptr
         // mov rdx, rsp
@@ -314,14 +279,8 @@ namespace toyjit::runtime {
         const auto helper_id = std::to_underlying(HelperID::lt_gen);
 
         // ; store `Value* target` (dest)
-        // mov r8, rsp
-        m_as.mov(x86::regs::r8, x86::regs::rsp);
-
-        // add r8, 8
-        m_as.add(x86::regs::r8, value_size);
-
-        // mov rsi, r8
-        m_as.mov(x86::regs::rsi, x86::regs::r8);
+        // lea rsi, [rsp + 8]
+        m_as.lea(x86::regs::rsi, x86::ptr(x86::regs::rsp, value_size));
 
         // ; store `Value* a1` (src) Value ptr
         // mov rdx, rsp
@@ -349,14 +308,8 @@ namespace toyjit::runtime {
         const auto helper_id = std::to_underlying(HelperID::gt_gen);
 
         // ; store `Value* target` (dest)
-        // mov r8, rsp
-        m_as.mov(x86::regs::r8, x86::regs::rsp);
-
-        // add r8, 8
-        m_as.add(x86::regs::r8, value_size);
-
-        // mov rsi, r8
-        m_as.mov(x86::regs::rsi, x86::regs::r8);
+        // lea rsi, [rsp + 8]
+        m_as.lea(x86::regs::rsi, x86::ptr(x86::regs::rsp, value_size));
 
         // ; store `Value* a1` (src) Value ptr
         // mov rdx, rsp
@@ -489,9 +442,10 @@ namespace toyjit::runtime {
         }
 
         // ! Here, restore the native stub's original arguments.
-        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
-        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
-        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
 
         return true; 
     }
