@@ -1,3 +1,5 @@
+#!/bin/zsh
+
 argc=$#;
 opt="$1";
 
