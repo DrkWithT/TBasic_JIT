@@ -70,7 +70,7 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
-bc_dump*.txt
+*_dump.txt
 
 # macOS
 .DS_Store

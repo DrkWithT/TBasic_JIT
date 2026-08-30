@@ -16,6 +16,7 @@ target_include_directories(toyjit_impl PRIVATE "${JIT_TEST_DEPS_DIR}/asmjit" "${
 target_sources(toyjit_impl PRIVATE
     "${JIT_TEST_SOURCE_DIR}/vm.cpp"
     "${JIT_TEST_SOURCE_DIR}/jit.cpp"
+    "${JIT_TEST_SOURCE_DIR}/jit_helpers.cpp"
 )
 
 add_executable(toyjit "${JIT_TEST_SOURCE_DIR}/main.cpp")
