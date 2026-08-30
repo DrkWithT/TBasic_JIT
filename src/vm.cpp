@@ -1,3 +1,4 @@
+#include <iostream>
 #include "vm.hpp"
 
 namespace toyjit::runtime {
@@ -18,8 +19,12 @@ namespace toyjit::runtime {
 
         if (stub_map.contains(chunk_id)) {
             // ! IMPORTANT: stub already exists --> reuse its trampoline by chunk ID!
+            std::cerr << "JIT LOG: stub " << chunk_id << " exists, reuse!\n";
+
             maybe_stub = stub_map.at(chunk_id);
         } else if (maybe_stub.index() == 0) {
+            std::cerr << "JIT LOG: chunk " << chunk_id << " is compiling.\n";
+
             // ? Generate new stub if stub doesn't exist AND if space is available.
             maybe_stub = std::async(
                 std::launch::async,
@@ -38,6 +43,8 @@ namespace toyjit::runtime {
             return;
         } else if (maybe_stub.index() == 1) {
             // ? Early case 2: Existing trampoline chunk is available by ID.
+            std::cerr << "JIT LOG: existing trampoline of " << chunk_id << " is patching.\n";
+
             const auto existing_trampoline_id = stub_map.at(old_callee_chunk_id);
 
             for (auto& chunk_code = pg->chunks[current_chunk_id].bc; auto& inst : chunk_code) {
@@ -48,6 +55,8 @@ namespace toyjit::runtime {
 
             return;
         }
+
+        std::cerr << "JIT LOG: trampoline of " << chunk_id << " is patching.\n";
 
         // ? Regular Case: retrieve freshly prepared JIT result...
         const std::int32_t next_stub_id = stubs.size();
@@ -121,9 +130,8 @@ namespace toyjit::runtime {
     }
 
     void op_add(VM* vm, runtime::Value* stack) {
-        vm->sp--;
-        auto lhs = stack + vm->sp;
-        const auto rhs = stack[vm->sp + 1];
+        auto lhs = stack + vm->sp - 1;
+        const auto rhs = stack[vm->sp];
 
         if (lhs->tag != rhs.tag) {
             *lhs = runtime::Value::make_nil();
@@ -135,14 +143,14 @@ namespace toyjit::runtime {
             *lhs = runtime::Value::make_nil();
         }
 
+        vm->sp--;
         vm->ip++;
     }
 
     void op_sub(VM* vm, runtime::Value* stack) {
-        vm->sp--;
-        auto lhs = stack + vm->sp;
-        const auto rhs = stack[vm->sp + 1];
-
+        auto lhs = stack + vm->sp - 1;
+        const auto rhs = stack[vm->sp];
+        
         if (lhs->tag != rhs.tag) {
             *lhs = runtime::Value::make_nil();
         } else if (lhs->tag == runtime::VTag::v_i32) {
@@ -152,7 +160,8 @@ namespace toyjit::runtime {
         } else {
             *lhs = runtime::Value::make_nil();
         }
-
+        
+        vm->sp--;
         vm->ip++;
     }
 
@@ -178,6 +187,7 @@ namespace toyjit::runtime {
             }
         }
 
+        vm->sp--;
         vm->ip++;
     }
 
@@ -203,6 +213,7 @@ namespace toyjit::runtime {
             }
         }
 
+        vm->sp--;
         vm->ip++;
     }
 
@@ -228,6 +239,7 @@ namespace toyjit::runtime {
             }
         }
 
+        vm->sp--;
         vm->ip++;
     }
 
@@ -253,6 +265,7 @@ namespace toyjit::runtime {
             }
         }
 
+        vm->sp--;
         vm->ip++;
     }
 
@@ -281,10 +294,11 @@ namespace toyjit::runtime {
     }
 
     void op_call(VM* vm, runtime::Value* stack) {
+        // todo: add self argument support at frames->back().self_p to emulate OO methods
         const std::int32_t curr_chunk_id = vm->cid;
         const std::int32_t chunk_id = vm->ip->w;
         const std::uint16_t callee_argc = vm->ip->s;
-        const std::int32_t callee_bp = vm->sp - callee_argc;
+        const std::int32_t callee_bp = vm->sp - callee_argc + 1;
         const std::int32_t caller_bp = vm->bp;
         const runtime::Inst* caller_rip = vm->ip + 1;
         const runtime::Value* caller_cvp = vm->cvp;

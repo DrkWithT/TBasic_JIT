@@ -68,16 +68,6 @@ namespace toyjit::runtime {
         constexpr bool running() const noexcept {
             return (flags & std::to_underlying(VMFlags::vm_running)) != 0;
         }
-        
-        [[nodiscard]]
-        constexpr bool is_chunk_jittable(std::int32_t chunk_id) const noexcept {
-            return pg->profiles[chunk_id].chunk_id != Profs::dead_num;
-        }
-
-        [[nodiscard]]
-        constexpr bool is_chunk_hot(std::int32_t chunk_id) const noexcept {
-            return pg->profiles[chunk_id].heat >= Profs::min_heat_to_jit;
-        }
 
         void jit_chunk(std::int32_t chunk_id, std::uint16_t argc); // todo
         void patch_chunk_calls(std::int32_t target_chunk_id, std::int32_t callee_chunk_id);
