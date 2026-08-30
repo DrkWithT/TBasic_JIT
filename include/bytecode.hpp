@@ -58,7 +58,7 @@ namespace toyjit::runtime {
     struct VM;
 
     // ? Holds a native function that is used by the JIT for complex, hard-to-compile operations e.g indexing a list. See README.
-    using HelperFn = void(*)(VM* vm, Value* dest, Value* a1, Value *a2);
+    using HelperFn = void(*)(VM* vm, Value* dest, Value* a1);
 
     // ? Interfaces with a piece of JITed or user-written native code. See README for usage and conventions.
     using StubFn = Value(*)(VM* vm, Value* locals, const Value* cvp, const HelperFn* helpers);
