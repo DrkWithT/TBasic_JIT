@@ -43,7 +43,7 @@ namespace toyjit::runtime {
             return;
         } else if (maybe_stub.index() == 1) {
             // ? Early case 2: Existing trampoline chunk is available by ID.
-            std::cerr << "JIT LOG: existing trampoline of " << chunk_id << " is patching.\n";
+            std::cerr << "JIT LOG: existing trampoline of " << old_callee_chunk_id << " is patching.\n";
 
             const auto existing_trampoline_id = stub_map.at(old_callee_chunk_id);
 
@@ -56,7 +56,7 @@ namespace toyjit::runtime {
             return;
         }
 
-        std::cerr << "JIT LOG: trampoline of " << chunk_id << " is patching.\n";
+        std::cerr << "JIT LOG: trampoline of " << old_callee_chunk_id << " is patching in.\n";
 
         // ? Regular Case: retrieve freshly prepared JIT result...
         const std::int32_t next_stub_id = stubs.size();
@@ -70,7 +70,8 @@ namespace toyjit::runtime {
                 Inst {.w = next_stub_id, .s = 0, .b = 0, .op = Op::native_call},
                 Inst {.w = 0, .s = 0, .b = 0, .op = Op::ret}
             },
-            .konsts = {},
+            // ! clone the constant buffer since easy-peasy is doable.
+            .konsts = std::vector {pg->chunks[old_callee_chunk_id].konsts},
             .cfg_id = -1,
             .prof_id = -1
         });
@@ -87,102 +88,103 @@ namespace toyjit::runtime {
     }
 
 
-    void op_nop(VM* vm, runtime::Value* stack) {
+    void op_nop(VM* vm, Value* stack) {
         vm->ip++;
     }
 
-    void op_reserve(VM* vm, runtime::Value* stack) {
+    void op_reserve(VM* vm, Value* stack) {
         vm->sp += vm->ip->w;
+        vm->ip++;
     }
 
-    void op_get_local(VM* vm, runtime::Value* stack) {
+    void op_get_local(VM* vm, Value* stack) {
         vm->sp++;
         stack[vm->sp] = stack[vm->bp + vm->ip->w];
         vm->ip++;
     }
 
-    void op_set_local(VM* vm, runtime::Value* stack) {
+    void op_set_local(VM* vm, Value* stack) {
         stack[vm->bp + vm->ip->w] = stack[vm->sp];
         vm->sp--;
         vm->ip++;
     }
 
-    void op_push_k(VM* vm, runtime::Value* stack) {
+    void op_push_k(VM* vm, Value* stack) {
         vm->sp++;
         stack[vm->sp] = vm->cvp[vm->ip->w];
         vm->ip++;
     }
 
-    void op_dup(VM* vm, runtime::Value* stack) {
+    void op_dup(VM* vm, Value* stack) {
         vm->sp++;
         stack[vm->sp] = stack[vm->sp - 1];
         vm->ip++;
     }
 
-    void op_swap(VM* vm, runtime::Value* stack) {
+    void op_swap(VM* vm, Value* stack) {
         std::swap(stack[vm->sp], stack[vm->sp - 1]);
         vm->ip++;
     }
 
-    void op_pop(VM* vm, runtime::Value* stack) {
+    void op_pop(VM* vm, Value* stack) {
         vm->sp--;
         vm->ip++;
     }
 
-    void op_add(VM* vm, runtime::Value* stack) {
+    void op_add(VM* vm, Value* stack) {
         auto lhs = stack + vm->sp - 1;
         const auto rhs = stack[vm->sp];
 
         if (lhs->tag != rhs.tag) {
-            *lhs = runtime::Value::make_nil();
-        } else if (lhs->tag == runtime::VTag::v_i32) {
-            *lhs = runtime::Value::make_i32(
+            *lhs = Value::make_nil();
+        } else if (lhs->tag == VTag::v_i32) {
+            *lhs = Value::make_i32(
                 lhs->data.n + rhs.data.n
             );
         } else {
-            *lhs = runtime::Value::make_nil();
+            *lhs = Value::make_nil();
         }
 
         vm->sp--;
         vm->ip++;
     }
 
-    void op_sub(VM* vm, runtime::Value* stack) {
+    void op_sub(VM* vm, Value* stack) {
         auto lhs = stack + vm->sp - 1;
         const auto rhs = stack[vm->sp];
         
         if (lhs->tag != rhs.tag) {
-            *lhs = runtime::Value::make_nil();
-        } else if (lhs->tag == runtime::VTag::v_i32) {
-            *lhs = runtime::Value::make_i32(
+            *lhs = Value::make_nil();
+        } else if (lhs->tag == VTag::v_i32) {
+            *lhs = Value::make_i32(
                 lhs->data.n - rhs.data.n
             );
         } else {
-            *lhs = runtime::Value::make_nil();
+            *lhs = Value::make_nil();
         }
         
         vm->sp--;
         vm->ip++;
     }
 
-    void op_eq(VM* vm, runtime::Value* stack) {
+    void op_eq(VM* vm, Value* stack) {
         auto lhs = stack + vm->sp - 1;
         const auto& rhs = stack[vm->sp];
 
         if (lhs->tag != rhs.tag) {
-            *lhs = runtime::Value::make_nil();
+            *lhs = Value::make_nil();
         } else {
             switch (rhs.tag) {
-            case runtime::VTag::v_nil:
-                *lhs = runtime::Value::make_bool(true);
+            case VTag::v_nil:
+                *lhs = Value::make_bool(true);
                 break;
-            case runtime::VTag::v_boolean:
-                *lhs = runtime::Value::make_bool(lhs->data.byte == rhs.data.byte);
+            case VTag::v_boolean:
+                *lhs = Value::make_bool(lhs->data.byte == rhs.data.byte);
                 break;
-            case runtime::VTag::v_i32:
-            case runtime::VTag::v_str:
-            case runtime::VTag::v_obj: default:
-                *lhs = runtime::Value::make_bool(lhs->data.n == rhs.data.n);
+            case VTag::v_i32:
+            case VTag::v_str:
+            case VTag::v_obj: default:
+                *lhs = Value::make_bool(lhs->data.n == rhs.data.n);
                 break;
             }
         }
@@ -191,24 +193,24 @@ namespace toyjit::runtime {
         vm->ip++;
     }
 
-    void op_ne(VM* vm, runtime::Value* stack) {
+    void op_ne(VM* vm, Value* stack) {
         auto lhs = stack + vm->sp - 1;
         const auto& rhs = stack[vm->sp];
 
         if (lhs->tag != rhs.tag) {
-            *lhs = runtime::Value::make_nil();
+            *lhs = Value::make_nil();
         } else {
             switch (rhs.tag) {
-            case runtime::VTag::v_nil:
-                *lhs = runtime::Value::make_bool(false);
+            case VTag::v_nil:
+                *lhs = Value::make_bool(false);
                 break;
-            case runtime::VTag::v_boolean:
-                *lhs = runtime::Value::make_bool(lhs->data.byte != rhs.data.byte);
+            case VTag::v_boolean:
+                *lhs = Value::make_bool(lhs->data.byte != rhs.data.byte);
                 break;
-            case runtime::VTag::v_i32:
-            case runtime::VTag::v_str:
-            case runtime::VTag::v_obj: default:
-                *lhs = runtime::Value::make_bool(lhs->data.n != rhs.data.n);
+            case VTag::v_i32:
+            case VTag::v_str:
+            case VTag::v_obj: default:
+                *lhs = Value::make_bool(lhs->data.n != rhs.data.n);
                 break;
             }
         }
@@ -217,24 +219,24 @@ namespace toyjit::runtime {
         vm->ip++;
     }
 
-    void op_lt(VM* vm, runtime::Value* stack) {
+    void op_lt(VM* vm, Value* stack) {
         auto lhs = stack + vm->sp - 1;
         const auto& rhs = stack[vm->sp];
 
         if (lhs->tag != rhs.tag) {
-            *lhs = runtime::Value::make_nil();
+            *lhs = Value::make_nil();
         } else {
             switch (rhs.tag) {
-            case runtime::VTag::v_nil:
-            case runtime::VTag::v_boolean:
-                *lhs = runtime::Value::make_bool(false);
+            case VTag::v_nil:
+            case VTag::v_boolean:
+                *lhs = Value::make_bool(false);
                 break;
-            case runtime::VTag::v_i32:
-                *lhs = runtime::Value::make_bool(lhs->data.n < rhs.data.n);
+            case VTag::v_i32:
+                *lhs = Value::make_bool(lhs->data.n < rhs.data.n);
                 break;
-            case runtime::VTag::v_str:
-            case runtime::VTag::v_obj: default:
-                *lhs = runtime::Value::make_bool(false);
+            case VTag::v_str:
+            case VTag::v_obj: default:
+                *lhs = Value::make_bool(false);
                 break;
             }
         }
@@ -243,24 +245,24 @@ namespace toyjit::runtime {
         vm->ip++;
     }
 
-    void op_gt(VM* vm, runtime::Value* stack) {
+    void op_gt(VM* vm, Value* stack) {
         auto lhs = stack + vm->sp - 1;
         const auto& rhs = stack[vm->sp];
 
         if (lhs->tag != rhs.tag) {
-            *lhs = runtime::Value::make_nil();
+            *lhs = Value::make_nil();
         } else {
             switch (rhs.tag) {
-            case runtime::VTag::v_nil:
-            case runtime::VTag::v_boolean:
-                *lhs = runtime::Value::make_bool(false);
+            case VTag::v_nil:
+            case VTag::v_boolean:
+                *lhs = Value::make_bool(false);
                 break;
-            case runtime::VTag::v_i32:
-                *lhs = runtime::Value::make_bool(lhs->data.n > rhs.data.n);
+            case VTag::v_i32:
+                *lhs = Value::make_bool(lhs->data.n > rhs.data.n);
                 break;
-            case runtime::VTag::v_str:
-            case runtime::VTag::v_obj: default:
-                *lhs = runtime::Value::make_bool(false);
+            case VTag::v_str:
+            case VTag::v_obj: default:
+                *lhs = Value::make_bool(false);
                 break;
             }
         }
@@ -269,8 +271,8 @@ namespace toyjit::runtime {
         vm->ip++;
     }
 
-    void op_jump_else(VM* vm, runtime::Value* stack) {
-        if (const auto temp = stack[vm->sp]; temp.tag == runtime::VTag::v_boolean && temp.data.byte == 1) {
+    void op_jump_else(VM* vm, Value* stack) {
+        if (const auto temp = stack[vm->sp]; temp.tag == VTag::v_boolean && temp.data.byte == 1) {
             vm->sp--;
             vm->ip++;
         } else {
@@ -279,8 +281,8 @@ namespace toyjit::runtime {
         }
     }
 
-    void op_jump_if(VM* vm, runtime::Value* stack) {
-        if (const auto temp = stack[vm->sp]; temp.tag == runtime::VTag::v_boolean && temp.data.byte == 0) {
+    void op_jump_if(VM* vm, Value* stack) {
+        if (const auto temp = stack[vm->sp]; temp.tag == VTag::v_boolean && temp.data.byte == 0) {
             vm->sp--;
             vm->ip++;
         } else {
@@ -289,19 +291,19 @@ namespace toyjit::runtime {
         }
     }
 
-    void op_jump(VM* vm, runtime::Value* stack) {
+    void op_jump(VM* vm, Value* stack) {
         vm->ip += vm->ip->w;
     }
 
-    void op_call(VM* vm, runtime::Value* stack) {
+    void op_call(VM* vm, Value* stack) {
         // todo: add self argument support at frames->back().self_p to emulate OO methods
         const std::int32_t curr_chunk_id = vm->cid;
         const std::int32_t chunk_id = vm->ip->w;
         const std::uint16_t callee_argc = vm->ip->s;
         const std::int32_t callee_bp = vm->sp - callee_argc + 1;
         const std::int32_t caller_bp = vm->bp;
-        const runtime::Inst* caller_rip = vm->ip + 1;
-        const runtime::Value* caller_cvp = vm->cvp;
+        const Inst* caller_rip = vm->ip + 1;
+        const Value* caller_cvp = vm->cvp;
         
         vm->frames.emplace_back(caller_rip, caller_cvp, caller_bp, callee_bp, curr_chunk_id);
         vm->bp = callee_bp;
@@ -313,19 +315,19 @@ namespace toyjit::runtime {
         vm->patch_chunk_calls(curr_chunk_id, chunk_id);
     }
 
-    void op_native_call(VM* vm, runtime::Value* stack) {
+    void op_native_call(VM* vm, Value* stack) {
         const std::int32_t native_id = vm->ip->w;
         const std::uint16_t callee_argc = vm->ip->s;
         const std::int32_t callee_bp = vm->bp; // ! BP is provided by the native trampoline which just passes the args as-is...
 
-        runtime::Value v = vm->stubs[native_id].f(vm, stack + callee_bp, vm->cvp, vm->helpers.data());
+        Value v = vm->stubs[native_id].f(vm, stack + callee_bp, vm->cvp, vm->helpers.data());
 
         vm->sp++;
         stack[vm->sp] = v;
         vm->ip++;
     }
 
-    void op_ret(VM* vm, runtime::Value* stack) {
+    void op_ret(VM* vm, Value* stack) {
         const auto& [old_rip, old_cvp, caller_bp, callee_bp, callee_cid] = vm->frames.back();
 
         stack[callee_bp] = stack[vm->sp];
@@ -350,26 +352,26 @@ namespace toyjit::runtime {
 
         while (vm->running()) {
             switch (vm->ip->op) {
-                case runtime::Op::nop: op_nop(vm, stack_data); break;
-                case runtime::Op::reserve: op_reserve(vm, stack_data); break;
-                case runtime::Op::get_local: op_get_local(vm, stack_data); break;
-                case runtime::Op::set_local: op_set_local(vm, stack_data); break;
-                case runtime::Op::push_k: op_push_k(vm, stack_data); break;
-                case runtime::Op::dup: op_dup(vm, stack_data); break;
-                case runtime::Op::swap: op_swap(vm, stack_data); break;
-                case runtime::Op::pop: op_pop(vm, stack_data); break;
-                case runtime::Op::add: op_add(vm, stack_data); break;
-                case runtime::Op::sub: op_sub(vm, stack_data); break;
-                case runtime::Op::eq: op_eq(vm, stack_data); break;
-                case runtime::Op::ne: op_ne(vm, stack_data); break;
-                case runtime::Op::lt: op_lt(vm, stack_data); break;
-                case runtime::Op::gt: op_gt(vm, stack_data); break;
-                case runtime::Op::jump_else: op_jump_else(vm, stack_data); break;
-                case runtime::Op::jump_if: op_jump_if(vm, stack_data); break;
-                case runtime::Op::jump: op_jump(vm, stack_data); break;
-                case runtime::Op::call: op_call(vm, stack_data); break;
-                case runtime::Op::native_call: op_native_call(vm, stack_data); break;
-                case runtime::Op::ret: op_ret(vm, stack_data); break;
+                case Op::nop: op_nop(vm, stack_data); break;
+                case Op::reserve: op_reserve(vm, stack_data); break;
+                case Op::get_local: op_get_local(vm, stack_data); break;
+                case Op::set_local: op_set_local(vm, stack_data); break;
+                case Op::push_k: op_push_k(vm, stack_data); break;
+                case Op::dup: op_dup(vm, stack_data); break;
+                case Op::swap: op_swap(vm, stack_data); break;
+                case Op::pop: op_pop(vm, stack_data); break;
+                case Op::add: op_add(vm, stack_data); break;
+                case Op::sub: op_sub(vm, stack_data); break;
+                case Op::eq: op_eq(vm, stack_data); break;
+                case Op::ne: op_ne(vm, stack_data); break;
+                case Op::lt: op_lt(vm, stack_data); break;
+                case Op::gt: op_gt(vm, stack_data); break;
+                case Op::jump_else: op_jump_else(vm, stack_data); break;
+                case Op::jump_if: op_jump_if(vm, stack_data); break;
+                case Op::jump: op_jump(vm, stack_data); break;
+                case Op::call: op_call(vm, stack_data); break;
+                case Op::native_call: op_native_call(vm, stack_data); break;
+                case Op::ret: op_ret(vm, stack_data); break;
                 default: return false;
             }
         }

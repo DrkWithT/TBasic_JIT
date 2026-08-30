@@ -50,6 +50,7 @@ namespace toyjit::runtime {
         // mov rbp, rsp
         m_as.mov(x86::regs::rbp, x86::regs::rsp);
         // ! Here, preserve copies of the parameters' register data for this NativeFn stub: VM* vm, Value* locals, const Value* cvp, const HelperFn* helpers are RDI, RSI, RDX, RCX. RDI is left the same anyways.
+        m_as.push(x86::regs::rdi);
         m_as.push(x86::regs::rsi);
         m_as.push(x86::regs::rdx);
         m_as.push(x86::regs::rcx);
@@ -78,7 +79,6 @@ namespace toyjit::runtime {
         // sub rsp, 8
         m_as.sub(x86::regs::rsp, value_size);
 
-        
         // ! Handle case of argument locals (Locals 0 to ARGC - 1).
         if (local_offset < m_argc) {
             // mov r8, [rsi + local_offset * 8] ... Base.Index.Scale
@@ -194,9 +194,10 @@ namespace toyjit::runtime {
         m_as.call(x86::regs::r9);
 
         // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
-        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
-        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
-        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -228,9 +229,10 @@ namespace toyjit::runtime {
         m_as.call(x86::regs::r9);
 
         // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
-        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
-        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
-        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -262,9 +264,10 @@ namespace toyjit::runtime {
         m_as.call(x86::regs::r9);
 
         // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
-        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
-        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
-        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -297,9 +300,10 @@ namespace toyjit::runtime {
         m_as.call(x86::regs::r9);
 
         // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
-        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
-        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
-        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -331,9 +335,10 @@ namespace toyjit::runtime {
         m_as.call(x86::regs::r9);
 
         // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
-        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
-        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
-        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -365,9 +370,10 @@ namespace toyjit::runtime {
         m_as.call(x86::regs::r9);
 
         // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
-        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -value_size));
-        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -2 * value_size));
-        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
         return true;
@@ -376,12 +382,12 @@ namespace toyjit::runtime {
     [[nodiscard]]
     bool JIT::emit_jump_else([[maybe_unused]] Inst i) {
         // ; Check if <temp>.data.byte is not zero, popping it and jumping to an unresolved label if so.
-        m_as.mov(x86::regs::r8d, x86::ptr(x86::regs::rsp, 0));
+        m_as.mov(x86::regs::r8b, x86::ptr(x86::regs::rsp, 0));
 
         m_as.add(x86::regs::rsp, value_size);
 
         // ; If the byte for boolean values is 0, expect it as `FALSE` to jump ahead.
-        m_as.cmp(x86::regs::r8d, 0);
+        m_as.cmp(x86::regs::r8b, 0);
 
         if (std::holds_alternative<JIT::Ifs>(m_flows.back())) {
             Label temp_end_tbody_label = m_as.new_label();
@@ -446,20 +452,20 @@ namespace toyjit::runtime {
         // mov BYTE PTR [rsp], 2     ; put Value {.data.n = <argc>, .tag = VTag::v_i32}
         m_as.mov(x86::regs::r8, 2);
         m_as.sub(x86::regs::rsp, value_union_size);
-        m_as.mov(x86::regs::ptr(x86::regs::rsp, 0), x86::regs::r8b);
+        m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
         // ; mov DWORD PTR [rsp], <argc>
         m_as.mov(x86::regs::r8, callee_argc);
         m_as.sub(x86::regs::rsp, value_union_size);
-        m_as.mov(x86::regs::ptr(x86::regs::rsp, 0), x86::regs::r8d);
+        m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d);
 
         // mov BYTE PTR [rsp], 2     ; put Value {.data.n = <chunk-ID>, .tag = VTag::v_i32}
         m_as.mov(x86::regs::r8, 2);
         m_as.sub(x86::regs::rsp, value_union_size);
-        m_as.mov(x86::regs::ptr(x86::regs::rsp, 0), x86::regs::r8b);
+        m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
         // ; mov DWORD PTR [rsp], <chunk-ID>
         m_as.mov(x86::regs::r8, callee_chunk_id);
         m_as.sub(x86::regs::rsp, value_union_size);
-        m_as.mov(x86::regs::ptr(x86::regs::rsp, 0), x86::regs::r8d);
+        m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d);
 
         // ! Here, prepare `Value* xa` of Value[2].
         // mov r9, rcx
