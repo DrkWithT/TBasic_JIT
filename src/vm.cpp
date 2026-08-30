@@ -1,29 +1,30 @@
-#include <iostream>
+// #include <iostream>
 #include "vm.hpp"
 
 namespace toyjit::runtime {
     void VM::jit_chunk(std::int32_t chunk_id, std::uint16_t argc) {
         // ? 1. Is the bytecode chunk able to track profiling information properly?
-        if (const auto& chunk = pg->chunks[chunk_id]; chunk.cfg_id == -1 || chunk.prof_id == -1) {
+        if (auto& chunk = pg->chunks[chunk_id]; chunk.prof_id == -1 || chunk.cfg_id == -1) {
             return;
-        }
-
-        // ? 2. Is the chunk able to JIT at all & is hot enough?
-        if (auto& chunk_profile = pg->profiles[chunk_id]; chunk_profile.chunk_id == -1) {
+        } else if (auto& chunk_profile = pg->profiles[chunk_id]; chunk_profile.chunk_id == -1) {
+            // ? 2. Is the chunk able to JIT at all & is hot enough?
             return;
         } else if (chunk_profile.heat < Profs::min_heat_to_jit) {
             // ? Increase heat anyways, as this function is attempted during every VM call.
             chunk_profile.heat++;
             return;
+        } else {
+            // ? Block wasted JIT attempts on this chunk if already hot enough.
+            chunk.prof_id = -1;
         }
 
         if (stub_map.contains(chunk_id)) {
             // ! IMPORTANT: stub already exists --> reuse its trampoline by chunk ID!
-            std::cerr << "JIT LOG: stub " << chunk_id << " exists, reuse!\n";
+            // std::cerr << "JIT LOG: stub " << chunk_id << " exists, reuse!\n";
 
             maybe_stub = stub_map.at(chunk_id);
         } else if (maybe_stub.index() == 0) {
-            std::cerr << "JIT LOG: chunk " << chunk_id << " is compiling.\n";
+            // std::cerr << "JIT LOG: chunk " << chunk_id << " is compiling.\n";
 
             // ? Generate new stub if stub doesn't exist AND if space is available.
             maybe_stub = std::async(
@@ -43,7 +44,7 @@ namespace toyjit::runtime {
             return;
         } else if (maybe_stub.index() == 1) {
             // ? Early case 2: Existing trampoline chunk is available by ID.
-            std::cerr << "JIT LOG: existing trampoline of " << old_callee_chunk_id << " is patching.\n";
+            // std::cerr << "JIT LOG: existing trampoline of " << old_callee_chunk_id << " is patching.\n";
 
             const auto existing_trampoline_id = stub_map.at(old_callee_chunk_id);
 
@@ -56,12 +57,11 @@ namespace toyjit::runtime {
             return;
         }
 
-        std::cerr << "JIT LOG: trampoline of " << old_callee_chunk_id << " is patching in.\n";
+        // std::cerr << "JIT LOG: trampoline of " << old_callee_chunk_id << " is patching in.\n";
 
         // ? Regular Case: retrieve freshly prepared JIT result...
         const std::int32_t next_stub_id = stubs.size();
-        auto prepared_stub_result = std::get<std::future<StubResult>>(maybe_stub).get();
-        stubs.push_back(prepared_stub_result);
+        stubs.push_back(std::get<std::future<StubResult>>(maybe_stub).get());
         maybe_stub = {};
 
         const std::int32_t trampoline_chunk_id = pg->chunks.size();
