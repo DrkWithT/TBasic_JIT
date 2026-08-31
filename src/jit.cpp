@@ -43,6 +43,112 @@ namespace toyjit::runtime {
         }
     }
 
+    bool JIT::update_sim_sp_with_nonary(Op op) {
+        switch (op) {
+        case Op::nop:
+            break;
+        case Op::dup:
+            m_sim_sp++;
+            m_sim_stack[m_sim_sp] = m_sim_stack[m_sim_sp - 1];
+
+            break;
+        case Op::swap:
+            std::swap(m_sim_stack[m_sim_sp], m_sim_stack[m_sim_sp - 1]);
+
+            break;
+        case Op::pop:
+            m_sim_sp--;
+
+            break;
+        case Op::add:
+        case Op::sub:
+            m_sim_sp--;
+
+            if (m_sim_stack[m_sim_sp] != m_sim_stack[m_sim_sp + 1]) {
+                m_sim_stack[m_sim_sp] = VTag::v_oops;
+            } else if (m_sim_stack[m_sim_sp] != VTag::v_i32) {
+                m_sim_stack[m_sim_sp] = VTag::v_oops;
+            }
+
+            break;
+        case Op::eq:
+        case Op::ne:
+        case Op::lt:
+        case Op::gt:
+            m_sim_sp--;
+            m_sim_stack[m_sim_sp] = VTag::v_boolean;
+
+            break;
+        default: return false;
+        }
+
+        return true;
+    }
+
+    bool JIT::update_sim_sp_with_unary(Op op, std::int32_t w) {
+        switch (op) {
+        case Op::reserve:
+            m_sim_sp += w;
+
+            break;
+        case Op::get_local:
+            m_sim_sp++;
+            m_sim_stack[m_sim_sp] = m_sim_stack[w];
+
+            break;
+        case Op::set_local:
+            m_sim_stack[w] = m_sim_stack[m_sim_sp];
+            m_sim_sp--;
+
+            break;
+        case Op::push_k:
+            m_sim_sp++;
+            m_sim_stack[m_sim_sp] = m_cfg.peek_konst(w)->tag;
+
+            break;
+        case Op::jump_else:
+        case Op::jump_if:
+            m_sim_sp--;
+
+            break;
+        case Op::jump: break;
+        default: return false;
+        }
+
+        return true;
+    }
+
+    bool JIT::update_sim_sp_with_binary(Op op, std::int32_t w, std::uint16_t s) {
+        switch (op) {
+            case Op::call:
+            case Op::native_call:
+                m_sim_sp -= s;
+                break;
+            default: return false;
+        }
+
+        return true;
+    }
+
+    [[nodiscard]]
+    bool JIT::update_sim_sp(Inst i) {
+        const auto [w, s, b, op] = i;
+
+        if (update_sim_sp_with_nonary(op)) {
+            ;
+        } else if (update_sim_sp_with_unary(op, w)) {
+            ;
+        } else if (update_sim_sp_with_binary(op, w, s)) {
+            ;
+        } else if (op == Op::ret) {
+            ;
+        } else {
+            return false;
+        }
+
+        return true;
+    }
+
     void JIT::emit_prelude() {
         // ; set up stack frame
         // push rbp
@@ -65,6 +171,8 @@ namespace toyjit::runtime {
     bool JIT::emit_reserve(Inst i) {
         const auto non_arg_locals_count = i.w;
 
+        update_sim_sp(i);
+
         // ; Reserve N slots for local Value values- These are set by initializer values from other computations via `set_local` code.
         m_as.sub(x86::regs::rsp, non_arg_locals_count * value_size);
 
@@ -75,6 +183,8 @@ namespace toyjit::runtime {
     bool JIT::emit_get_local(Inst i) {
         // ! The raw offset here is actually relative to stack[CALLEE_BP] where local 0 is. This means that the stub should offset directly from `locals` which points back to `stack[CALLEE_BP]`.
         const auto local_offset = i.w;
+
+        update_sim_sp(i);
 
         // ! Handle case of argument locals (Locals 0 to ARGC - 1).
         if (local_offset < m_argc) {
@@ -109,12 +219,16 @@ namespace toyjit::runtime {
             m_as.mov(x86::ptr(x86::regs::rbp, -(non_arg_local_offset + 5) * value_size), x86::regs::r8);
         }
 
+        update_sim_sp(i);
+
         return true;
     }
 
     [[nodiscard]]
     bool JIT::emit_push_k(Inst i) {
         const auto konst_offset = i.w;
+
+        update_sim_sp(i);
 
         // mov r8, [rdx + konst_offset * 8] ... Base.Index.Scale
         m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rdx, konst_offset * value_size));
@@ -126,6 +240,8 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_dup([[maybe_unused]] Inst i) {
+        update_sim_sp(i);
+
         // mov r8, [rsp]
         m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rsp, 0));
 
@@ -146,6 +262,8 @@ namespace toyjit::runtime {
         // mov [rsp], r8
         m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8);
 
+        update_sim_sp(i);
+
         return true;
     }
 
@@ -153,11 +271,23 @@ namespace toyjit::runtime {
     bool JIT::emit_pop([[maybe_unused]] Inst i) {
         m_as.add(x86::regs::rsp, value_size);
 
+        update_sim_sp(i);
+
         return true;
     }
 
     [[nodiscard]]
     bool JIT::emit_add(Inst i) {
+        // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
+        if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            m_as.pop(x86::regs::r8);
+            m_as.add(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n += rhs->data.n;
+
+            update_sim_sp(i);
+
+            return true;
+        }
+
         // ! NOTE: call generic helper here, as this JIT is too naive to know if all possible temporaries are of the same type from the bytecode instructions alone.
         const auto helper_id = std::to_underlying(HelperID::add_gen);
 
@@ -183,11 +313,23 @@ namespace toyjit::runtime {
         m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
+        update_sim_sp(i);
+
         return true;
     }
 
     [[nodiscard]]
     bool JIT::emit_sub(Inst i) {
+        // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
+        if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            m_as.pop(x86::regs::r8);
+            m_as.add(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n -= rhs->data.n;
+
+            update_sim_sp(i);
+
+            return true;
+        }
+
         const auto helper_id = std::to_underlying(HelperID::sub_gen);
 
         // ; store `Value* target` (dest)
@@ -212,11 +354,48 @@ namespace toyjit::runtime {
         m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
+        update_sim_sp(i);
+
         return true;
     }
 
     [[nodiscard]]
     bool JIT::emit_eq(Inst i) {
+        // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
+        if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            m_as.xor(x86::regs::r9, x86::regs::r9); // ! temp_flag = false; until proven true
+            m_as.pop(x86::regs::r8);
+            m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
+
+            asmjit::Label post_set_true_label = m_as.new_label();
+            m_as.jne(post_set_true_label);
+            m_as.mov(x86::regs::r9, 1);
+            m_as.bind(post_set_true_label);
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::regs::r8, 1);
+            m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
+
+            update_sim_sp(i);
+
+            return true;
+        } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
+            m_as.xor(x86::regs::r9b, x86::regs::r9b);
+            m_as.pop(x86::regs::r8);
+            m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
+
+            asmjit::Label post_set_true_label = m_as.new_label();
+            m_as.jne(post_set_true_label);
+            m_as.mov(x86::regs::r9b, 1);
+            m_as.bind(post_set_true_label);
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::regs::r8, 1);
+            m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
+
+            update_sim_sp(i);
+
+            return true;
+        }
+
         const auto helper_id = std::to_underlying(HelperID::eq_gen);
 
         // ; store `Value* target` (dest)
@@ -241,11 +420,48 @@ namespace toyjit::runtime {
         m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
+        update_sim_sp(i);
+
         return true;
     }
 
     [[nodiscard]]
     bool JIT::emit_ne(Inst i) {
+        // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
+        if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            m_as.xor(x86::regs::r9b, x86::regs::r9b); // ! temp_flag = false; until proven true
+            m_as.pop(x86::regs::r8);
+            m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
+
+            asmjit::Label post_set_true_label = m_as.new_label();
+            m_as.je(post_set_true_label);
+            m_as.mov(x86::regs::r9b, 1);
+            m_as.bind(post_set_true_label);
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::regs::r8, 1);
+            m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
+
+            update_sim_sp(i);
+
+            return true;
+        } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
+            m_as.xor(x86::regs::r9b, x86::regs::r9b);
+            m_as.pop(x86::regs::r8);
+            m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
+
+            asmjit::Label post_set_true_label = m_as.new_label();
+            m_as.je(post_set_true_label);
+            m_as.mov(x86::regs::r9b, 1);
+            m_as.bind(post_set_true_label);
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::regs::r8, 1);
+            m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
+
+            update_sim_sp(i);
+
+            return true;
+        }
+
         const auto helper_id = std::to_underlying(HelperID::ne_gen);
 
         // ; Register rdi is the same (VM* vm), but save RSI, RDX to preserve the arg-local ptr and cvp ptr
@@ -271,11 +487,48 @@ namespace toyjit::runtime {
         m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
+        update_sim_sp(i);
+
         return true;
     }
 
     [[nodiscard]]
     bool JIT::emit_lt(Inst i) {
+        // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
+        if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            m_as.xor(x86::regs::r9b, x86::regs::r9b); // ! temp_flag = false; until proven true
+            m_as.pop(x86::regs::r8);
+            m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
+
+            asmjit::Label post_set_true_label = m_as.new_label();
+            m_as.jge(post_set_true_label);
+            m_as.mov(x86::regs::r9b, 1);
+            m_as.bind(post_set_true_label);
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::regs::r8, 1);
+            m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
+
+            update_sim_sp(i);
+
+            return true;
+        } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
+            m_as.xor(x86::regs::r9b, x86::regs::r9b);
+            m_as.pop(x86::regs::r8);
+            m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
+
+            asmjit::Label post_set_true_label = m_as.new_label();
+            m_as.jge(post_set_true_label);
+            m_as.mov(x86::regs::r9b, 1);
+            m_as.bind(post_set_true_label);
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::regs::r8, 1);
+            m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
+
+            update_sim_sp(i);
+
+            return true;
+        }
+
         const auto helper_id = std::to_underlying(HelperID::lt_gen);
 
         // ; store `Value* target` (dest)
@@ -300,11 +553,48 @@ namespace toyjit::runtime {
         m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
+        update_sim_sp(i);
+
         return true;
     }
 
     [[nodiscard]]
     bool JIT::emit_gt(Inst i) {
+        // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
+        if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            m_as.xor(x86::regs::r9b, x86::regs::r9b); // ! temp_flag = false; until proven true
+            m_as.pop(x86::regs::r8);
+            m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
+
+            asmjit::Label post_set_true_label = m_as.new_label();
+            m_as.jle(post_set_true_label);
+            m_as.mov(x86::regs::r9b, 1);
+            m_as.bind(post_set_true_label);
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::regs::r8, 1);
+            m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
+
+            update_sim_sp(i);
+
+            return true;
+        } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
+            m_as.xor(x86::regs::r9b, x86::regs::r9b);
+            m_as.pop(x86::regs::r8);
+            m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
+
+            asmjit::Label post_set_true_label = m_as.new_label();
+            m_as.jle(post_set_true_label);
+            m_as.mov(x86::regs::r9b, 1);
+            m_as.bind(post_set_true_label);
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::regs::r8, 1);
+            m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
+
+            update_sim_sp(i);
+
+            return true;
+        }
+
         const auto helper_id = std::to_underlying(HelperID::gt_gen);
 
         // ; store `Value* target` (dest)
@@ -329,15 +619,15 @@ namespace toyjit::runtime {
         m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
         m_as.add(x86::regs::rsp, value_size);
 
+        update_sim_sp(i);
+
         return true;
     }
 
     [[nodiscard]]
     bool JIT::emit_jump_else([[maybe_unused]] Inst i) {
         // ; Check if <temp>.data.byte is not zero, popping it and jumping to an unresolved label if so.
-        m_as.mov(x86::regs::r8b, x86::ptr(x86::regs::rsp, 0));
-
-        m_as.add(x86::regs::rsp, value_size);
+        m_as.pop(x86::regs::r8);
 
         // ; If the byte for boolean values is 0, expect it as `FALSE` to jump ahead.
         m_as.cmp(x86::regs::r8b, 0);
@@ -356,7 +646,8 @@ namespace toyjit::runtime {
             return false;
         }
         // ; Otherwise, let control flow fall through by 1 instruction
-        // ...
+
+        update_sim_sp(i);
 
         return true;
     }
@@ -364,6 +655,9 @@ namespace toyjit::runtime {
     [[nodiscard]]
     bool JIT::emit_jump_if(Inst i) {
         std::cerr << "JIT of VM jump-if-true is unsupported :(\n";
+
+        update_sim_sp(i);
+
         return false; // no-op, control flow is handled natively
     }
 
@@ -389,10 +683,7 @@ namespace toyjit::runtime {
         const std::int32_t callee_argc = i.s;
 
         // ? Form a pointer to N Values to feed the helper via `Value* a1`.
-        m_as.mov(x86::regs::r9, x86::regs::rsp);
-        if (callee_argc > 0) {
-            m_as.add(x86::regs::r9, value_size * (callee_argc - 1));
-        }
+        m_as.lea(x86::regs::r9, x86::ptr(x86::regs::rsp, value_size * (callee_argc - 1)));
 
         // ! Here, store `Value* target` (dest) which is equal to `Value* a1` in this specifc case since the invoke_cid helper needs N natively-passed args to push onto the VM stack for the cid's trampoline call with arg-locals.
         // mov rsi, r9
@@ -436,10 +727,7 @@ namespace toyjit::runtime {
 
         // ! Here, remove the used temporaries behind `Value* a1`.
         m_as.add(x86::regs::rsp, 2 * value_size);
-
-        if (callee_argc > 0) {
-            m_as.add(x86::regs::rsp, value_size * (callee_argc - 1));
-        }
+        m_as.add(x86::regs::rsp, value_size * (callee_argc - 1));
 
         // ! Here, restore the native stub's original arguments.
         m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
@@ -447,12 +735,17 @@ namespace toyjit::runtime {
         m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -3 * value_size));
         m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
 
+        update_sim_sp(i);
+
         return true; 
     }
 
     [[nodiscard]]
     bool JIT::emit_native_call(Inst i) {
         std::cerr << "JIT of VM native_call is unsupported :(\n";
+
+        update_sim_sp(i);
+
         return false; // todo
     }
 
@@ -470,6 +763,8 @@ namespace toyjit::runtime {
         // pop rbp
         m_as.pop(x86::regs::rbp);
         m_as.ret();
+
+        update_sim_sp(i);
 
         return true;
     }
@@ -539,12 +834,20 @@ namespace toyjit::runtime {
             return false;
         }
 
-        if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        const auto child_falsy = block->right_child;
+        const auto child_truthy = block->left_child;
+
+        if (!m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (!m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
+        }
+
+        if (child_falsy == compiler::BB::dud_id && child_truthy == compiler::BB::dud_id) {
+            // ? Reset the checkpoint position of the simulated value type stack since this childless, general BB might be concluding 1 of 2 control flow branches.
+            m_sim_sp = m_sim_bases.back();
         }
 
         return true;
@@ -553,13 +856,17 @@ namespace toyjit::runtime {
     [[nodiscard]]
     bool JIT::emit_if_starter(const compiler::BB* block) {
         m_flows.emplace_back(JIT::Ifs {});
-
+        
         if (!emit_instructions(block->data, block->n)) {
             return false;
         }
 
+        m_sim_bases.push_back(m_sim_sp);
+
         if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
+            // ? Here, reset the simulated SP to properly check the latter runtime path. Otherwise, the truthy path leads to a direct successor which is executed, generating more stack temporaries.
+            m_sim_sp = m_sim_bases.back();
         }
 
         if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
@@ -576,13 +883,22 @@ namespace toyjit::runtime {
         }
 
         m_flows.pop_back();
+        m_sim_bases.pop_back();
 
-        if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        const auto child_falsy = block->right_child;
+        const auto child_truthy = block->left_child;
+
+        if (!m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (!m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
+        }
+
+        if (child_falsy == compiler::BB::dud_id && child_truthy == compiler::BB::dud_id) {
+            // ? Reset the checkpoint position of the simulated value type stack since this childless, general BB might be concluding 1 of 2 control flow branches.
+            m_sim_sp = m_sim_bases.back();
         }
 
         return true;
@@ -595,13 +911,20 @@ namespace toyjit::runtime {
         }
 
         // m_as.jump(std::get<JIT::Ifs>(m_flows.back).end_fbody_label); // ! Handle via emit_jump...
+        const auto child_falsy = block->right_child;
+        const auto child_truthy = block->left_child; 
 
-        if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        if (!m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (!m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
+        }
+
+        if (child_falsy == compiler::BB::dud_id && child_truthy == compiler::BB::dud_id) {
+            // ? Reset the checkpoint position of the simulated value type stack since this childless, general BB might be concluding 1 of 2 control flow branches.
+            m_sim_sp = m_sim_bases.back();
         }
 
         return true;
@@ -617,12 +940,20 @@ namespace toyjit::runtime {
 
         m_as.bind(std::get<JIT::Ifs>(m_flows.back()).end_fbody_label);
 
-        if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        const auto child_falsy = block->right_child;
+        const auto child_truthy = block->left_child;
+
+        if (!m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; !m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (!m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+            // ? Only a truthy successor would be generated by the bytecode compiler, so resetting the sim stack is unneeded.
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
+        }
+
+        if (child_falsy == compiler::BB::dud_id && child_truthy == compiler::BB::dud_id) {
+            m_sim_sp = m_sim_bases.back();
         }
 
         return true;
@@ -640,6 +971,8 @@ namespace toyjit::runtime {
             return false;
         }
 
+        m_sim_bases.push_back(m_sim_sp);
+
         if (const auto child_falsy = block->right_child; !m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
@@ -648,6 +981,7 @@ namespace toyjit::runtime {
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
         }
 
+        // ? Starts of loops will have the body at T-child, mandated by the bytecode compiler.
         return true;
     }
 
@@ -660,22 +994,44 @@ namespace toyjit::runtime {
             return false;
         }
 
-        if (const auto child_falsy = block->right_child; m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
+        const auto child_falsy = block->right_child;
+        const auto child_truthy = block->left_child;
+
+        if (m_bbc.contains(child_falsy) && child_falsy != compiler::BB::dud_id) {
             m_bbf.push_back(m_cfg->get_bb(child_falsy));
         }
 
-        if (const auto child_truthy = block->left_child; m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+        if (m_bbc.contains(child_truthy) && child_truthy != compiler::BB::dud_id) {
+            // ? Loop enders can only have a T-child if so. No need to reset simulated SP.
             m_bbf.push_back(m_cfg->get_bb(child_truthy));
+        }
+
+        if (child_falsy == compiler::BB::dud_id && child_truthy == compiler::BB::dud_id) {
+            m_sim_sp = m_sim_bases.back();
         }
 
         return true;
     }
 
     [[nodiscard]]
-    StubResult JIT::generate(const compiler::CFG* cfg, std::int32_t old_chunk_id, std::uint16_t argc) {
+    StubResult JIT::generate(const compiler::CFG* cfg, std::int32_t old_chunk_id, const Value* argv, std::uint16_t argc) {
         m_cfg = cfg;
+
+        if (argc > Profs::max_stub_arity) {
+            return {};
+        }
+
+        m_sim_stack.clear();
+        m_sim_bases.clear();
         m_old_chunk_id = old_chunk_id;
+        m_sim_sp = 0;
         m_argc = argc;
+
+        for (std::int32_t argv_offset = 0; argv_offset < m_argc; argv_offset++, m_sim_sp++) {
+            const auto v_tag = argv[argv_offset].tag;
+            m_arg_types[argv_offset] = v_tag;
+            m_sim_stack[m_sim_sp] = v_tag;
+        }
 
         m_bbc.clear();
         m_flows.clear();
@@ -729,7 +1085,8 @@ namespace toyjit::runtime {
         return StubResult {
             .f = temp_f,
             .old_cid = m_old_chunk_id,
-            .argc = m_argc
+            .argc = m_argc,
+            .arg_types = m_arg_types
         };
     }
 }
