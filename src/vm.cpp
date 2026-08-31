@@ -2,28 +2,27 @@
 #include "vm.hpp"
 
 namespace toyjit::runtime {
-    void VM::jit_chunk(std::int32_t chunk_id, std::uint16_t argc, const Value* argv) {
-        // ? 1. Is the bytecode chunk able to track profiling information properly?
-        if (auto& chunk = pg->chunks[chunk_id]; chunk.prof_id == -1 || chunk.cfg_id == -1) {
+    void VM::jit_chunk(std::int32_t current_chunk_id, std::int32_t chunk_id, std::uint16_t argc, const Value* argv) {
+        auto& chunk_profile = pg->profiles[chunk_id];
+
+        if (chunk_profile.chunk_id == Profs::dead_num) {
+            // ? 1. Is the chunk JIT-banned? It's probably done already.
             return;
-        } else if (auto& chunk_profile = pg->profiles[chunk_id]; chunk_profile.chunk_id == -1) {
-            // ? 2. Is the chunk able to JIT at all & is hot enough?
+        }
+
+        chunk_profile.heat++;
+
+        if (chunk_profile.heat < Profs::min_heat_to_jit) {
+            // ? 2. Avoid JITing cold chunks.
             return;
-        } else if (chunk_profile.heat < Profs::min_heat_to_jit) {
-            // ? Increase heat anyways, as this function is attempted during every VM call.
-            chunk_profile.heat++;
-            return;
-        } else {
-            // ? Block wasted JIT attempts on this chunk if already hot enough.
-            chunk.prof_id = -1;
         }
 
         if (stub_map.contains(chunk_id)) {
             // ! IMPORTANT: stub already exists --> reuse its trampoline by chunk ID!
             // std::cerr << "JIT LOG: stub " << chunk_id << " exists, reuse!\n";
 
-            maybe_stub = stub_map.at(chunk_id);
-        } else if (maybe_stub.index() == 0) {
+            salvage_jit_trampoline(current_chunk_id, chunk_id);
+        } else if (!maybe_stub) {
             // std::cerr << "JIT LOG: chunk " << chunk_id << " is compiling.\n";
 
             // ? Generate new stub if stub doesn't exist AND if space is available.
@@ -36,30 +35,24 @@ namespace toyjit::runtime {
                 argv,
                 argc
             );
+        } else if (maybe_stub->valid()) {
+            patch_chunk_calls(current_chunk_id, chunk_id);
+        }
+    }
+
+    void VM::salvage_jit_trampoline(std::int32_t current_chunk_id, std::int32_t old_callee_chunk_id) {
+        const auto existing_trampoline_id = stub_map.at(old_callee_chunk_id);
+
+        for (auto& chunk_code = pg->chunks[current_chunk_id].bc; auto& inst : chunk_code) {
+            if (inst.op == Op::call && inst.w == old_callee_chunk_id) {
+                inst.w = existing_trampoline_id;
+            }
         }
     }
 
     void VM::patch_chunk_calls(std::int32_t current_chunk_id, std::int32_t old_callee_chunk_id) {
-        if (auto& profile_info = pg->profiles[old_callee_chunk_id]; profile_info.chunk_id == Profs::dead_num || maybe_stub.index() == 0) {
-            // ? Early case 1: None stub result case.
-            return;
-        } else if (maybe_stub.index() == 1) {
-            // ? Early case 2: Existing trampoline chunk is available by ID.
-            // std::cerr << "JIT LOG: existing trampoline of " << old_callee_chunk_id << " is patching.\n";
-
-            const auto existing_trampoline_id = stub_map.at(old_callee_chunk_id);
-
-            for (auto& chunk_code = pg->chunks[current_chunk_id].bc; auto& inst : chunk_code) {
-                if (inst.op == Op::call && inst.w == old_callee_chunk_id) {
-                    inst.w = existing_trampoline_id;
-                }
-            }
-
-            return;
-        }
-
         // std::cerr << "JIT LOG: trampoline of " << old_callee_chunk_id << " is patching in.\n";
-        auto jit_result = std::get<std::future<StubResult>>(maybe_stub).get();
+        auto jit_result = maybe_stub->get();
         std::vector<Inst> temp_trampoline_bc;
 
         // ! IMPORTANT: emit all type guards in the trampoline's prefixing bytecode. This practically ensures that only specializable types hit this happy-path stub.
@@ -70,19 +63,21 @@ namespace toyjit::runtime {
         // ? Regular Case: retrieve freshly prepared JIT result...
         const std::int32_t next_stub_id = stubs.size();
         stubs.push_back(std::move(jit_result));
-        maybe_stub = {};
+        maybe_stub.reset();
 
         temp_trampoline_bc.emplace_back(next_stub_id, 0, 0, Op::native_call);
         temp_trampoline_bc.emplace_back(0, 0, 0, Op::ret);
 
         const std::int32_t trampoline_chunk_id = pg->chunks.size();
+        const std::int32_t trampoline_prof_id = pg->profiles.size();
         pg->chunks.push_back(Chunk {
             .bc = std::move(temp_trampoline_bc),
             // ! IMPORTANT: Clone the constant buffer to avoid use-after-moves for the original one.
             .konsts = std::vector {pg->chunks[old_callee_chunk_id].konsts},
             .cfg_id = -1,
-            .prof_id = -1
+            .prof_id = trampoline_prof_id
         });
+        pg->profiles.emplace_back(); // ? Trampolines have dead profile metadata to avoid bogus JITs.
 
         for (auto& chunk_code = pg->chunks[current_chunk_id].bc; auto& inst : chunk_code) {
             if (inst.op == Op::call && inst.w == old_callee_chunk_id) {
@@ -92,7 +87,7 @@ namespace toyjit::runtime {
 
         stub_map.insert_or_assign(old_callee_chunk_id, trampoline_chunk_id);
         pg->profiles[old_callee_chunk_id].chunk_id = Profs::dead_num;
-        pg->profiles[old_callee_chunk_id].heat = 0;
+        pg->profiles[trampoline_prof_id].chunk_id = Profs::dead_num;
     }
 
 
@@ -306,7 +301,7 @@ namespace toyjit::runtime {
     void op_call(VM* vm, Value* stack) {
         // todo: add self argument support at frames->back().self_p to emulate OO methods
         const std::int32_t curr_chunk_id = vm->cid;
-        const std::int32_t chunk_id = vm->ip->w;
+        const std::int32_t callee_chunk_id = vm->ip->w;
         const std::uint16_t callee_argc = vm->ip->s;
         const std::int32_t callee_bp = vm->sp - callee_argc + 1;
         const std::int32_t caller_bp = vm->bp;
@@ -315,12 +310,11 @@ namespace toyjit::runtime {
         
         vm->frames.emplace_back(caller_rip, caller_cvp, caller_bp, callee_bp, curr_chunk_id);
         vm->bp = callee_bp;
-        vm->ip = vm->pg->chunks[chunk_id].bc.data();
-        vm->cvp = vm->pg->chunks[chunk_id].konsts.data();
-        vm->cid = chunk_id;
+        vm->ip = vm->pg->chunks[callee_chunk_id].bc.data();
+        vm->cvp = vm->pg->chunks[callee_chunk_id].konsts.data();
+        vm->cid = callee_chunk_id;
 
-        vm->jit_chunk(chunk_id, callee_argc, stack + callee_bp);
-        vm->patch_chunk_calls(curr_chunk_id, chunk_id);
+        vm->jit_chunk(curr_chunk_id, callee_chunk_id, callee_argc, stack + callee_bp);
     }
 
     void op_native_call(VM* vm, Value* stack) {

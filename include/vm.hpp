@@ -3,7 +3,7 @@
 #include <utility>
 #include <array>
 #include <vector>
-#include <variant>
+#include <optional>
 #include <unordered_map>
 #include <future>
 
@@ -38,7 +38,7 @@ namespace toyjit::runtime {
 
     /* 2: baseline bytecode interpreter */
     struct VM {
-        using StubStore = std::variant<std::monostate, int, std::future<StubResult>>;
+        using StubStore = std::optional<std::future<StubResult>>;
         static constexpr std::uint32_t base_stack_max = 1280;
         static constexpr std::uint32_t base_depth_max = 64;
 
@@ -109,7 +109,8 @@ namespace toyjit::runtime {
             return result;
         }
 
-        void jit_chunk(std::int32_t chunk_id, std::uint16_t argc, const Value* argv);
+        void jit_chunk(std::int32_t current_chunk_id, std::int32_t chunk_id, std::uint16_t argc, const Value* argv);
+        void salvage_jit_trampoline(std::int32_t current_chunk_id, std::int32_t old_callee_chunk_id);
         void patch_chunk_calls(std::int32_t target_chunk_id, std::int32_t callee_chunk_id);
     };
 }
