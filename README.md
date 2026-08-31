@@ -31,8 +31,6 @@ This is a baseline stack VM with a naive JIT tier, using AsmJit and C++26. Maybe
    - The deopt logic runs, removing the VM trampoline's `CallFrame` and taking the slow, generic path through the original bytecode chunk to recover.
 
 ### TODOs
- 6. Use call helper in any `JIT::emit_call`. **WIP**
-   - Check for "oops" tag of `RAX` value after call to repeat that helper into the original chunk by ID.
- 8. Update `VM` to use the new `JIT` and deopt logic. **WIP**
- 9. Test. **TODO**
- 10. Add more deopt logic to release a `StubFn` ptr from the AsmJit runtime and "reset" the `Prof` and `StubResult` of that original chunk ID. Then _revert_ all invalidated trampoline call sites. **TODO**
+ 1. Add multiplication & division JIT support.
+ 2. Add nullish check JIT support.
+ 3. Add more deopt logic to release a `StubFn` ptr from the AsmJit runtime and "reset" the `Prof` and `StubResult` of that original chunk ID. Then _revert_ all invalidated trampoline call sites. **TODO**
