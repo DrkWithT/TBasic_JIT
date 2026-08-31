@@ -12,6 +12,7 @@ namespace toyjit::runtime {
         v_i32,
         v_str,
         v_obj,
+        v_oops,
     };
 
     struct Value {
@@ -59,6 +60,14 @@ namespace toyjit::runtime {
             return {
                 .data = {.n = id},
                 .tag = temp_tag
+            };
+        }
+
+        [[nodiscard]]
+        static constexpr Value make_oops() noexcept {
+            return {
+                .data = {.byte = {}},
+                .tag = VTag::v_oops
             };
         }
     };

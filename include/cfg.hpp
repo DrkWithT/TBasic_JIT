@@ -45,11 +45,12 @@ namespace toyjit::compiler {
 
     class CFG {
         std::vector<BB> m_blocks;
-        int m_entry_id {0};
+        const runtime::Value* m_konsts {};
+        int m_entry_id {};
 
     public:
-        constexpr CFG()
-        : m_blocks {}, m_entry_id {} {}
+        constexpr CFG(const runtime::Value* konsts_ptr)
+        : m_blocks {}, m_konsts {konsts_ptr}, m_entry_id {} {}
 
         constexpr int add_bb(const runtime::Inst* bc, std::size_t n, BBTag tag) {
             const auto next_bb_id = m_blocks.size();
@@ -80,6 +81,11 @@ namespace toyjit::compiler {
             } else if constexpr (Dir == 'R') {
                 bb.right_child = dest;
             }
+        }
+
+        [[nodiscard]]
+        constexpr const runtime::Value* peek_konst(std::int32_t id) const noexcept {
+            return m_konsts.data() + id;
         }
     };
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <vector>
 #include "value.hpp"
 
@@ -25,6 +26,8 @@ namespace toyjit::runtime {
         call,
         native_call,
         ret,
+        guard_arg_type,
+        last
     };
 
     struct Inst {
@@ -42,11 +45,13 @@ namespace toyjit::runtime {
     };
 
     struct Profs {
+        static constexpr std::size_t max_stub_arity = 4;
         static constexpr std::int32_t min_heat_to_jit = 129;
         static constexpr std::int32_t dead_num = -1;
 
         std::int32_t heat {dead_num};      // IF <= `dead_heat_no_jit`, treat the corresponding chunk as non-JITable.
         std::int32_t chunk_id {dead_num};  // IF >= 0, the chunk ID is valid to track.
+        std::array<VTag, Profs::max_stub_arity> arg_types {};
     };
 
     struct Program {
@@ -61,7 +66,7 @@ namespace toyjit::runtime {
     // ? Parameter Regs: rdi, rsi, rdx, rcx
     using HelperFn = void(*)(VM* vm, Value* dest, Value* a1, Value* xa);
 
-    // ? Interfaces with a piece of JITed or user-written native code. See README for usage and conventions.
+    // ? Interfaces with a piece of JITed or user-written native code. See README for usage and conventions. But `locals` is often & initially argument-locals at 1st. 
     using StubFn = Value(*)(VM* vm, Value* locals, const Value* cvp, const HelperFn* helpers);
 
     // ? Tracks optimized JIT stub and its original, interpreted chunk ID (index). If a JIT attempts to JIT the same chunk, a quick cache lookup will find this same stub to use.
@@ -69,23 +74,24 @@ namespace toyjit::runtime {
         StubFn f {};
         std::int32_t old_cid {-1}; // originally JITed chunk's index, but the chunk remains as bytecode to deopt to.
         std::uint16_t argc {};
+        std::array<VTag, Profs::max_stub_arity> arg_types {};
 
         explicit constexpr operator bool() const noexcept {
             return f != nullptr && old_cid != -1;
         }
     };
 
-    // ? Named indexes to JIT glue functions (which help handle complex / generic operations with any Value).
+    // ? Named indexes to JIT glue functions (which help handle complex operations with any Value).
     enum class HelperID : std::int32_t {
         add_gen,
         sub_gen,
-        // mul_gen, // todo
-        // div_gen, // todo
+        // mul_gen,
+        // div_gen,
         eq_gen,
         ne_gen,
         lt_gen,
         gt_gen,
-        invoke_cid,
+        try_sub_call,
         last
     };
 }
