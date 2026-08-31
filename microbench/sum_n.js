@@ -13,7 +13,11 @@ function sumN(n) {
 
 var i = 0;
 
-while (i < 1000) {
+var start = Date.now();
+
+while (i < 2000) {
     void sumN(100);
     i = i + 1;
 }
+
+console.log((Date.now() - start), "ms");

@@ -46,7 +46,7 @@ namespace toyjit::runtime {
 
     struct Profs {
         static constexpr std::size_t max_stub_arity = 4;
-        static constexpr std::int32_t min_heat_to_jit = 129;
+        static constexpr std::int32_t min_heat_to_jit = 61;
         static constexpr std::int32_t dead_num = -1;
 
         std::int32_t heat {dead_num};      // IF <= `dead_heat_no_jit`, treat the corresponding chunk as non-JITable.
