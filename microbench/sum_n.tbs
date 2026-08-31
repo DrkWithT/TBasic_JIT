@@ -11,7 +11,7 @@ FUN sumN(n):
     RET x;
 END
 
-LET x : 1000, dud : 0;
+LET x : 2000, dud : 0;
 
 WHILE x > 0:
    dud := sumN(100);
