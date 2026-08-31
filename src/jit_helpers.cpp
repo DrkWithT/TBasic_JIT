@@ -102,6 +102,6 @@ namespace toyjit::runtime {
             vm->stack[vm->sp] = a1[-load_arg_i];
         }
 
-        *dest = vm->sub_call(chunk_id, callee_arg);
+        *dest = vm->sub_call(chunk_id, callee_argc);
     }
 }

@@ -85,7 +85,7 @@ namespace toyjit::compiler {
 
         [[nodiscard]]
         constexpr const runtime::Value* peek_konst(std::int32_t id) const noexcept {
-            return m_konsts.data() + id;
+            return m_konsts + id;
         }
     };
 }

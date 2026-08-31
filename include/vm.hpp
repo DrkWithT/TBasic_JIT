@@ -77,12 +77,12 @@ namespace toyjit::runtime {
 
         // ! IMPORTANT: Only use this for trampolines which have special handling of frames, especially for JIT stubbed callers.
         [[nodiscard]]
-        constexpr Value sub_call(std::int32_t chunk_id, std:uint16_t argc) {
+        constexpr Value sub_call(std::int32_t chunk_id, std::uint16_t argc) {
             const auto& chunk = pg->chunks[chunk_id];
             const Value* caller_cvp = chunk.konsts.data();
             const std::int32_t callee_bp = sp - argc + 1;
             const std::int32_t caller_bp = callee_bp;
-            const std:uint16_t old_end_depth = end_depth;
+            const std::uint16_t old_end_depth = end_depth;
   
             frames.emplace_back(nullptr, caller_cvp, caller_bp, callee_bp, chunk_id);
             bp = callee_bp;

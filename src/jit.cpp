@@ -103,7 +103,7 @@ namespace toyjit::runtime {
             break;
         case Op::push_k:
             m_sim_sp++;
-            m_sim_stack[m_sim_sp] = m_cfg.peek_konst(w)->tag;
+            m_sim_stack[m_sim_sp] = m_cfg->peek_konst(w)->tag;
 
             break;
         case Op::jump_else:
@@ -130,7 +130,6 @@ namespace toyjit::runtime {
         return true;
     }
 
-    [[nodiscard]]
     bool JIT::update_sim_sp(Inst i) {
         const auto [w, s, b, op] = i;
 
@@ -323,7 +322,7 @@ namespace toyjit::runtime {
         // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
             m_as.pop(x86::regs::r8);
-            m_as.add(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n -= rhs->data.n;
+            m_as.sub(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n -= rhs->data.n;
 
             update_sim_sp(i);
 
@@ -363,7 +362,7 @@ namespace toyjit::runtime {
     bool JIT::emit_eq(Inst i) {
         // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
-            m_as.xor(x86::regs::r9, x86::regs::r9); // ! temp_flag = false; until proven true
+            m_as.mov(x86::regs::r9, 0); // ! temp_flag = false; until proven true
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
 
@@ -371,7 +370,7 @@ namespace toyjit::runtime {
             m_as.jne(post_set_true_label);
             m_as.mov(x86::regs::r9, 1);
             m_as.bind(post_set_true_label);
-            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r9b); // temp.data.byte = temp_flag;
             m_as.mov(x86::regs::r8, 1);
             m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
 
@@ -379,15 +378,15 @@ namespace toyjit::runtime {
 
             return true;
         } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
-            m_as.xor(x86::regs::r9b, x86::regs::r9b);
+            m_as.mov(x86::regs::r9, 0);
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
 
             asmjit::Label post_set_true_label = m_as.new_label();
             m_as.jne(post_set_true_label);
-            m_as.mov(x86::regs::r9b, 1);
+            m_as.mov(x86::regs::r9, 1);
             m_as.bind(post_set_true_label);
-            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r9b); // temp.data.byte = temp_flag;
             m_as.mov(x86::regs::r8, 1);
             m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
 
@@ -429,15 +428,15 @@ namespace toyjit::runtime {
     bool JIT::emit_ne(Inst i) {
         // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
-            m_as.xor(x86::regs::r9b, x86::regs::r9b); // ! temp_flag = false; until proven true
+            m_as.mov(x86::regs::r9, 0); // ! temp_flag = false; until proven true
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
 
             asmjit::Label post_set_true_label = m_as.new_label();
             m_as.je(post_set_true_label);
-            m_as.mov(x86::regs::r9b, 1);
+            m_as.mov(x86::regs::r9, 1);
             m_as.bind(post_set_true_label);
-            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r9b); // temp.data.byte = temp_flag;
             m_as.mov(x86::regs::r8, 1);
             m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
 
@@ -445,15 +444,15 @@ namespace toyjit::runtime {
 
             return true;
         } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
-            m_as.xor(x86::regs::r9b, x86::regs::r9b);
+            m_as.mov(x86::regs::r9, 0);
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
 
             asmjit::Label post_set_true_label = m_as.new_label();
             m_as.je(post_set_true_label);
-            m_as.mov(x86::regs::r9b, 1);
+            m_as.mov(x86::regs::r9, 1);
             m_as.bind(post_set_true_label);
-            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r9b); // temp.data.byte = temp_flag;
             m_as.mov(x86::regs::r8, 1);
             m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
 
@@ -496,7 +495,7 @@ namespace toyjit::runtime {
     bool JIT::emit_lt(Inst i) {
         // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
-            m_as.xor(x86::regs::r9b, x86::regs::r9b); // ! temp_flag = false; until proven true
+            m_as.mov(x86::regs::r9, 0); // ! temp_flag = false; until proven true
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
 
@@ -504,7 +503,7 @@ namespace toyjit::runtime {
             m_as.jge(post_set_true_label);
             m_as.mov(x86::regs::r9b, 1);
             m_as.bind(post_set_true_label);
-            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r9b); // temp.data.byte = temp_flag;
             m_as.mov(x86::regs::r8, 1);
             m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
 
@@ -512,15 +511,15 @@ namespace toyjit::runtime {
 
             return true;
         } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
-            m_as.xor(x86::regs::r9b, x86::regs::r9b);
+            m_as.mov(x86::regs::r9, 0);
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
 
             asmjit::Label post_set_true_label = m_as.new_label();
             m_as.jge(post_set_true_label);
-            m_as.mov(x86::regs::r9b, 1);
+            m_as.mov(x86::regs::r9, 1);
             m_as.bind(post_set_true_label);
-            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r9b); // temp.data.byte = temp_flag;
             m_as.mov(x86::regs::r8, 1);
             m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
 
@@ -562,15 +561,15 @@ namespace toyjit::runtime {
     bool JIT::emit_gt(Inst i) {
         // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
-            m_as.xor(x86::regs::r9b, x86::regs::r9b); // ! temp_flag = false; until proven true
+            m_as.mov(x86::regs::r9, 0); // ! temp_flag = false; until proven true
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
 
             asmjit::Label post_set_true_label = m_as.new_label();
             m_as.jle(post_set_true_label);
-            m_as.mov(x86::regs::r9b, 1);
+            m_as.mov(x86::regs::r9, 1);
             m_as.bind(post_set_true_label);
-            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r9b); // temp.data.byte = temp_flag;
             m_as.mov(x86::regs::r8, 1);
             m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
 
@@ -578,15 +577,15 @@ namespace toyjit::runtime {
 
             return true;
         } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
-            m_as.xor(x86::regs::r9b, x86::regs::r9b);
+            m_as.mov(x86::regs::r9, 0);
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
 
             asmjit::Label post_set_true_label = m_as.new_label();
             m_as.jle(post_set_true_label);
-            m_as.mov(x86::regs::r9b, 1);
+            m_as.mov(x86::regs::r9, 1);
             m_as.bind(post_set_true_label);
-            m_as.mov(x86::ptr(x86::regs::rsp, 0), r9d); // temp.data.byte = temp_flag;
+            m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r9b); // temp.data.byte = temp_flag;
             m_as.mov(x86::regs::r8, 1);
             m_as.mov(x86::ptr(x86::regs::rsp, value_union_size), x86::regs::r8b); // temp.tag = v_boolean;
 
@@ -678,7 +677,7 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_call(Inst i) {
-        const auto helper_id = std::to_underlying(HelperID::invoke_cid);
+        const auto helper_id = std::to_underlying(HelperID::try_sub_call);
         const std::int32_t callee_chunk_id = i.w;
         const std::int32_t callee_argc = i.s;
 

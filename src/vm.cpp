@@ -34,7 +34,7 @@ namespace toyjit::runtime {
                 cfgs.data() + chunk_id,
                 chunk_id,
                 argv,
-                argc,
+                argc
             );
         }
     }
@@ -64,7 +64,7 @@ namespace toyjit::runtime {
 
         // ! IMPORTANT: emit all type guards in the trampoline's prefixing bytecode. This practically ensures that only specializable types hit this happy-path stub.
         for (std::int32_t arg_local_idx = 0; arg_local_idx < jit_result.argc; arg_local_idx++) {
-            temp_trampoline_bc.emplace_back(arg_local_idx, 0, static_cast<std::uint8_t>(arg_types[arg_local_idx]), Op::guard_arg_type);
+            temp_trampoline_bc.emplace_back(arg_local_idx, 0, static_cast<std::uint8_t>(jit_result.arg_types[arg_local_idx]), Op::guard_arg_type);
         }
 
         // ? Regular Case: retrieve freshly prepared JIT result...

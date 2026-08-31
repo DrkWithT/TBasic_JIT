@@ -64,7 +64,6 @@ namespace toyjit::runtime {
         bool update_sim_sp_with_binary(Op op, std::int32_t w, std::uint16_t s);
 
         // ! IMPORTANT: call this BEFORE dynamic asm emission for opcodes that initially push values. Otherwise, call this AFTER dynamic asm emission.
-        [[nodiscard]]
         bool update_sim_sp(Inst i);
 
         void emit_prelude();
