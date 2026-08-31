@@ -51,7 +51,6 @@ namespace toyjit::runtime {
 
         std::int32_t heat {dead_num};      // IF <= `dead_heat_no_jit`, treat the corresponding chunk as non-JITable.
         std::int32_t chunk_id {dead_num};  // IF >= 0, the chunk ID is valid to track.
-        std::array<VTag, Profs::max_stub_arity> arg_types {};
     };
 
     struct Program {

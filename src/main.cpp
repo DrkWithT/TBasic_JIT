@@ -20,7 +20,7 @@ constexpr std::array<runtime::HelperFn, static_cast<std::size_t>(runtime::Helper
     runtime::jit_ne_gen,
     runtime::jit_lt_gen,
     runtime::jit_gt_gen,
-    runtime::jit_invoke_cid,
+    runtime::jit_try_sub_call
 };
 
 int main() {
@@ -133,7 +133,7 @@ int main() {
         .prof_id = 1
     };
 
-    compiler::CFG sum_n_cfg {};
+    compiler::CFG sum_n_cfg {sum_n.konsts.data()};
     const auto sum_n_bb_0 = sum_n_cfg.add_bb(
         sum_n.bc.data(),
         3,
@@ -163,7 +163,8 @@ int main() {
     temp_chunks.push_back(std::move(sum_n));
 
     std::vector<runtime::Profs> temp_profs;
-    temp_profs.emplace_back(0, -1); // ? Note: Don't track heat of main.
+    // ? Don't track heat of main for simplicity.
+    temp_profs.emplace_back(0, -1);
     temp_profs.emplace_back(0, 1);
 
     std::vector<compiler::CFG> temp_cfgs;
