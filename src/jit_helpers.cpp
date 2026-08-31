@@ -92,8 +92,7 @@ namespace toyjit::runtime {
         }
     }
 
-    void jit_invoke_cid(VM* vm, Value* dest, Value* a1, Value* xa) {
-        const std::int32_t curr_chunk_id = vm->cid;
+    void jit_try_sub_call(VM* vm, Value* dest, Value* a1, Value* xa) {
         const std::int32_t chunk_id = xa[0].data.n;
         const std::uint16_t callee_argc = xa[1].data.n;
 
@@ -103,19 +102,6 @@ namespace toyjit::runtime {
             vm->stack[vm->sp] = a1[-load_arg_i];
         }
 
-        const std::int32_t callee_bp = vm->sp - callee_argc + 1;
-        const std::int32_t caller_bp = vm->bp;
-        const runtime::Inst* caller_rip = vm->ip + 1;
-        const runtime::Value* caller_cvp = vm->cvp;
-        
-        vm->frames.emplace_back(caller_rip, caller_cvp, caller_bp, callee_bp, curr_chunk_id);
-        vm->bp = callee_bp;
-        vm->ip = vm->pg->chunks[chunk_id].bc.data();
-        vm->cvp = vm->pg->chunks[chunk_id].konsts.data();
-        vm->cid = chunk_id;
-
-        // ! Here, never JIT recursively for any helpers since I must keep things simple.
-        // vm->jit_chunk(chunk_id, callee_argc);
-        // vm->patch_chunk_calls(curr_chunk_id, chunk_id);
+        *dest = vm->sub_call(chunk_id, callee_arg);
     }
 }
