@@ -31,6 +31,11 @@ namespace toyjit::runtime {
         vm_bad_ref = 0x10,
     };
 
+    struct VM;
+
+    [[nodiscard]]
+    bool run_vm(VM* vm);
+
     /* 2: baseline bytecode interpreter */
     struct VM {
         using StubStore = std::variant<std::monostate, int, std::future<StubResult>>;
@@ -52,9 +57,10 @@ namespace toyjit::runtime {
         std::uint32_t sp;           // stack top
         std::int32_t cid;           // chunk ID
         std::uint16_t flags;
+        std::uint16_t end_depth;
 
         constexpr VM(std::array<HelperFn, static_cast<std::size_t>(HelperID::last)> helpers_v, std::vector<compiler::CFG> cfg_list, JIT* jit_p, runtime::Program* program_p)
-        : stub_map {}, frames {}, stack (base_stack_max), stubs {}, cfgs (std::move(cfg_list)), helpers (std::move(helpers_v)), maybe_stub {}, jit {jit_p}, pg {program_p}, ip {}, cvp {}, bp {}, sp {}, cid {-1}, flags {static_cast<std::uint16_t>(VMFlags::vm_running)} {
+        : stub_map {}, frames {}, stack (base_stack_max), stubs {}, cfgs (std::move(cfg_list)), helpers (std::move(helpers_v)), maybe_stub {}, jit {jit_p}, pg {program_p}, ip {}, cvp {}, bp {}, sp {}, cid {-1}, flags {static_cast<std::uint16_t>(VMFlags::vm_running)}, end_depth {} {
             const auto program_main_chunk_id = pg->first_chunk_id;
 
             frames.emplace_back(nullptr, nullptr, 0, 0, -1);
@@ -69,10 +75,41 @@ namespace toyjit::runtime {
             return (flags & std::to_underlying(VMFlags::vm_running)) != 0;
         }
 
-        void jit_chunk(std::int32_t chunk_id, std::uint16_t argc); // todo
+        // ! IMPORTANT: Only use this for trampolines which have special handling of frames, especially for JIT stubbed callers.
+        [[nodiscard]]
+        constexpr Value sub_call(std::int32_t chunk_id, std:uint16_t argc) {
+            const auto& chunk = pg->chunks[chunk_id];
+            const Value* caller_cvp = chunk.konsts.data();
+            const std::int32_t callee_bp = sp - argc + 1;
+            const std::int32_t caller_bp = callee_bp;
+            const std:uint16_t old_end_depth = end_depth;
+  
+            frames.emplace_back(nullptr, caller_cvp, caller_bp, callee_bp, chunk_id);
+            bp = callee_bp;
+            ip = chunk.bc.data();
+            cvp = caller_cvp;
+            cid = chunk_id;
+            end_depth = frames.size();
+
+            // ? Note that any Op::ret will discard temporaries and the CallFrame for us, leaving the result in the trampoline's `CALLEE_BP`. Just resume the VM with the previous ending call depth and post-trampoline state.
+            const auto sub_call_was_ok = run_vm(this);
+
+            sp = callee_bp - 1; // ? Here, restore the SP before the parent stub call.
+            end_depth = old_end_depth;
+
+            Value result;
+
+            if (sub_call_was_ok) {
+                result = stack[sp + 1];
+                flags |= std::to_underlying(VMFlags::vm_running);
+            } else {
+                result = Value::make_oops();
+            }
+
+            return result;
+        }
+
+        void jit_chunk(std::int32_t chunk_id, std::uint16_t argc, const Value* argv);
         void patch_chunk_calls(std::int32_t target_chunk_id, std::int32_t callee_chunk_id);
     };
-
-    [[nodiscard]]
-    bool run_vm(VM* vm);
 }
