@@ -1,7 +1,5 @@
 #!/bin/zsh
 
-shopt -s expand_aliases;
-
 if [[ $# -ne 1 ]]; then
     printf "\x1b[1;33mUsage:\x1b[0m ./bench.sh [<bench name>]\n";
     exit 1;
