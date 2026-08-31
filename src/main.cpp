@@ -27,7 +27,7 @@ int main() {
     // ? Create a sample program for a procedure summing 1 to N.
     /**
      * @brief Contains starting bytecode.
-     * ? LET x : 1000, dud : 0;
+     * ? LET x : 2000, dud : 0;
      * ? 
      * ? WHILE x > 0:
      * ?    dud := sumN(100);
@@ -71,7 +71,7 @@ int main() {
             runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::ret}
         },
         .konsts = {
-            runtime::Value::make_i32(1000),  // ? Constant 0
+            runtime::Value::make_i32(2000),  // ? Constant 0
             runtime::Value::make_i32(100),   // ? Constant 1
             runtime::Value::make_i32(1),     // ? Constant 2
             runtime::Value::make_i32(0)      // ? Constant 3
@@ -168,7 +168,7 @@ int main() {
     temp_profs.emplace_back(0, 1);
 
     std::vector<compiler::CFG> temp_cfgs;
-    temp_cfgs.emplace_back(); // ? Note: Don't handle any main CFG as top-level code runs once.
+    temp_cfgs.emplace_back(nullptr); // ? Note: Don't handle any main CFG as top-level code runs once.
     temp_cfgs.emplace_back(std::move(sum_n_cfg));
 
     runtime::JIT jit;
