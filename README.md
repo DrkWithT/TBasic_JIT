@@ -34,3 +34,8 @@ This is a baseline stack VM with a naive JIT tier, using AsmJit and C++26. Maybe
  1. Add multiplication & division JIT support.
  2. Add nullish check JIT support.
  3. Add more deopt logic to release a `StubFn` ptr from the AsmJit runtime and "reset" the `Prof` and `StubResult` of that original chunk ID. Then _revert_ all invalidated trampoline call sites. **TODO**
+ 4. Add initial, modifed _TBasic_ dialect frontend & bytecode compiler.
+    - Support to TBasic `0.4.0` and diverge from there.
+    - Support superglobals.
+    - All objects are shape-IC optimized collections of Values. Semantically, they act like metatables.
+    - Support object method calls.

@@ -1,0 +1,11 @@
+`test recursive fibonacci 25`
+
+FUN fibRec(n):
+    IF n < 2:
+        RET n;
+    END
+
+    RET fibRec(n - 1) + fibRec(n - 2);
+END
+
+RET fibRec(25);
