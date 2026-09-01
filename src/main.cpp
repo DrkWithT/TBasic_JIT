@@ -24,158 +24,121 @@ constexpr std::array<runtime::HelperFn, static_cast<std::size_t>(runtime::Helper
 };
 
 int main() {
-    // ? Create a sample program for a procedure summing 1 to N.
+    // ? Create a recursive Fibonacci 25 program.
     /**
      * @brief Contains starting bytecode.
-     * ? LET x : 2000, dud : 0;
-     * ? 
-     * ? WHILE x > 0:
-     * ?    dud := sumN(100);
-     * ?    x := x - 1;
-     * ? END
-     * ? 
-     * ? RET 1;
+     * ? RET fibRec(25);
      */
     runtime::Chunk main_logic {
         .bc = {
-            // ! BB 0: general setup, children = (1, -1)
-            // ? LET x : 400, dud : 0;
-            runtime::Inst {.w = 2, .s = 0, .b = 0, .op = runtime::Op::reserve},
+            // ! BB 0: general setup, children = (-1, -1)
+            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::reserve},
+            // ? <call fibRec(25)>
             runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::push_k},
-            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::set_local},
-            runtime::Inst {.w = 3, .s = 0, .b = 0, .op = runtime::Op::push_k},
-            runtime::Inst {.w = 1, .s = 0, .b = 0, .op = runtime::Op::set_local},
-            // ! BB 1: LOOP STARTER, children = (2, 3)
-            // ? (x > 0)
-            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::get_local},
-            runtime::Inst {.w = 3, .s = 0, .b = 0, .op = runtime::Op::push_k},
-            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::gt},
-            runtime::Inst {.w = 9, .s = 0, .b = 0, .op = runtime::Op::jump_else},
-            // ! BB 2: loop body (left), children = (-1, -1)
-            // ? WHILE n > 0: ...
-            // ?     dud := sumN(100);
-            runtime::Inst {.w = 1, .s = 0, .b = 0, .op = runtime::Op::push_k},
             runtime::Inst {.w = 1, .s = 1, .b = 0, .op = runtime::Op::call},
-            runtime::Inst {.w = 1, .s = 0, .b = 0, .op = runtime::Op::set_local},
-            // ?     x := x - 1;
-            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::get_local},
-            runtime::Inst {.w = 2, .s = 0, .b = 0, .op = runtime::Op::push_k},
-            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::sub},
-            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::set_local},
-            // ! CONTINUE LOOP... 
-            runtime::Inst {.w = -11, .s = 0, .b = 0, .op = runtime::Op::jump},
-            // ? END
-            // ! BB 3: LOOP ENDER / POST-LOOP (right), children = (-1, -1)
-            // ? RET 1;
-            runtime::Inst {.w = 2, .s = 0, .b = 0, .op = runtime::Op::push_k},
+            // ? RET <temp>;
             runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::ret}
         },
         .konsts = {
-            runtime::Value::make_i32(2000),  // ? Constant 0
-            runtime::Value::make_i32(100),   // ? Constant 1
-            runtime::Value::make_i32(1),     // ? Constant 2
-            runtime::Value::make_i32(0)      // ? Constant 3
+            runtime::Value::make_i32(25),  // ? Constant 0
+            runtime::Value::make_i32(1)    // ? Constant 1
         },
         .cfg_id = 0,
         .prof_id = 0
     };
     /**
-     * ! IMPORTANT: Models the following TBasic procedure:
-     * ? FUN sumN(n):
-     * ?      LET x : 0;
-     * ?      
-     * ?      WHILE n > 0:
-     * ?          x := x + n;
-     * ?          n := n - 1;
-     * ?      END
-     * ?      
-     * ?      RET x;
+     * ! IMPORTANT: Models the naive Fibonacci TBasic procedure:
+     * ? FUN fibRec(n):
+     * ?    IF n < 2:
+     * ?        RET n;
+     * ?    END
+     * ? 
+     * ?    RET fibRec(n - 1) + fibRec(n - 2);
      * ? END
      */
-    runtime::Chunk sum_n {
+    runtime::Chunk fib_rec {
         .bc = {
-            // ! BB 0: general setup, children = (1, -1)
-            // ? LET x : 0;
-            runtime::Inst {.w = 1, .s = 0, .b = 0, .op = runtime::Op::reserve},
-            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::push_k},
-            runtime::Inst {.w = 1, .s = 0, .b = 0, .op = runtime::Op::set_local},
-            // ! BB 1: LOOP STARTER, children = (2, 3)
-            // ? (n > 0)
+            // ! BB 0: general for setup, children = (1, -1)
+            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::reserve},
+            // ! BB 1: IF STARTER, children = (2, 3)
+            // ? compare (n < 2)
             runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::get_local},
             runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::push_k},
-            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::gt},
-            runtime::Inst {.w = 10, .s = 0, .b = 0, .op = runtime::Op::jump_else},
-            // ! BB 2: loop body (left), children = (-1, -1)
-            // ? WHILE n > 0: ...
-            // ?      x := x + n;
-            runtime::Inst {.w = 1, .s = 0, .b = 0, .op = runtime::Op::get_local},
+            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::lt},
+            runtime::Inst {.w = 3, .s = 0, .b = 0, .op = runtime::Op::jump_else},
+            // ! BB 2: truthy body (left), children = (-1, -1)
+            // ? IF n < 2: ...
+            // ?    RET n;
             runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::get_local},
-            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::add},
-            runtime::Inst {.w = 1, .s = 0, .b = 0, .op = runtime::Op::set_local},
-            // ?     n := n - 1;
+            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::ret},
+            // ? END
+            // ! BB 3: falsy body (right), children = (-1, -1)
+            // ? <call fibRec(n - 1)>
             runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::get_local},
             runtime::Inst {.w = 1, .s = 0, .b = 0, .op = runtime::Op::push_k},
             runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::sub},
-            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::set_local},
-            // ! CONTINUE LOOP... 
-            runtime::Inst {.w = -12, .s = 0, .b = 0, .op = runtime::Op::jump},
-            // ? END
-            // ! BB 3: LOOP ENDER / POST-LOOP (right), children = (-1, -1)
-            // ? RET x;
-            runtime::Inst {.w = 1, .s = 0, .b = 0, .op = runtime::Op::get_local},
+            runtime::Inst {.w = 1, .s = 1, .b = 0, .op = runtime::Op::call},
+            // ? <call fibRec(n - 2)>
+            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::get_local},
+            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::push_k},
+            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::sub},
+            runtime::Inst {.w = 1, .s = 1, .b = 0, .op = runtime::Op::call},
+            // ? ... + ...
+            runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::add},
+            // ? RET <temp>;
             runtime::Inst {.w = 0, .s = 0, .b = 0, .op = runtime::Op::ret}
+            // ? END
         },
         .konsts = {
-            runtime::Value::make_i32(0), // ? Constant 0
-            runtime::Value::make_i32(1)  // ? Constant 1
+            runtime::Value::make_i32(2),    // ? Constant 0
+            runtime::Value::make_i32(1)     // ? Constant 1
         },
         .cfg_id = 1,
         .prof_id = 1
     };
 
-    compiler::CFG sum_n_cfg {sum_n.konsts.data()};
-    const auto sum_n_bb_0 = sum_n_cfg.add_bb(
-        sum_n.bc.data(),
-        3,
+    compiler::CFG fib_rec_cfg {fib_rec.konsts.data()};
+    const auto fib_rec_bb_0 = fib_rec_cfg.add_bb(
+        fib_rec.bc.data(),
+        1,
         compiler::BBTag::general
     );
-    const auto sum_n_bb_1 = sum_n_cfg.add_bb(
-        sum_n.bc.data() + 3,
+    const auto fib_rec_bb_1 = fib_rec_cfg.add_bb(
+        fib_rec.bc.data() + 1,
         4,
-        compiler::BBTag::start_loop
+        compiler::BBTag::start_ifs
     );
-    const auto sum_n_bb_2 = sum_n_cfg.add_bb(
-        sum_n.bc.data() + 7,
-        9,
-        compiler::BBTag::general
-    );
-    const auto sum_n_bb_3 = sum_n_cfg.add_bb(
-        sum_n.bc.data() + 16,
+    const auto fib_rec_bb_2 = fib_rec_cfg.add_bb(
+        fib_rec.bc.data() + 5,
         2,
-        compiler::BBTag::end_loop
+        compiler::BBTag::tbody_ifs
     );
-    sum_n_cfg.link_bb<'L'>(sum_n_bb_0, sum_n_bb_1);
-    sum_n_cfg.link_bb<'L'>(sum_n_bb_1, sum_n_bb_2);
-    sum_n_cfg.link_bb<'R'>(sum_n_bb_1, sum_n_bb_3);
+    const auto fib_rec_bb_3 = fib_rec_cfg.add_bb(
+        fib_rec.bc.data() + 7,
+        10,
+        compiler::BBTag::fbody_ifs
+    );
+    fib_rec_cfg.link_bb<'L'>(fib_rec_bb_0, fib_rec_bb_1);
+    fib_rec_cfg.link_bb<'L'>(fib_rec_bb_1, fib_rec_bb_2);
+    fib_rec_cfg.link_bb<'R'>(fib_rec_bb_1, fib_rec_bb_3);
 
     std::vector<runtime::Chunk> temp_chunks;
     temp_chunks.push_back(std::move(main_logic));
-    temp_chunks.push_back(std::move(sum_n));
+    temp_chunks.push_back(std::move(fib_rec));
 
     std::vector<runtime::Profs> temp_profs;
-    // ? Don't track heat of main for simplicity.
-    temp_profs.emplace_back(0, -1);
+    temp_profs.emplace_back(0, -1);     // ? Don't track heat of main for simplicity.
     temp_profs.emplace_back(0, 1);
 
     std::vector<compiler::CFG> temp_cfgs;
-    temp_cfgs.emplace_back(nullptr); // ? Note: Don't handle any main CFG as top-level code runs once.
-    temp_cfgs.emplace_back(std::move(sum_n_cfg));
+    temp_cfgs.emplace_back(nullptr);    // ? Note: Don't track top-level code's CFG- it should not be JITed since it runs once.
+    temp_cfgs.emplace_back(std::move(fib_rec_cfg));
 
     runtime::JIT jit;
     runtime::Program pg {
         .chunks = std::move(temp_chunks),
         .profiles = std::move(temp_profs),
-        .first_chunk_id = 0 // ? Start at top-level / main.
+        .first_chunk_id = 0 // ? Start at top-level code.
     };
     runtime::VM engine {
         helper_table,

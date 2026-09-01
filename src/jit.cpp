@@ -149,6 +149,11 @@ namespace toyjit::runtime {
     }
 
     void JIT::emit_prelude() {
+        // ; mark function start in case of self-recursion
+        Label start_fn_label = m_as.new_label();
+        m_self_label = start_fn_label;
+        m_as.bind(start_fn_label);
+
         // ; set up stack frame
         // push rbp
         m_as.push(x86::regs::rbp);
@@ -173,7 +178,9 @@ namespace toyjit::runtime {
         update_sim_sp(i);
 
         // ; Reserve N slots for local Value values- These are set by initializer values from other computations via `set_local` code.
-        m_as.sub(x86::regs::rsp, non_arg_locals_count * value_size);
+        if (non_arg_locals_count > 0) {
+            m_as.sub(x86::regs::rsp, non_arg_locals_count * value_size);
+        }
 
         return true;
     }
@@ -677,9 +684,47 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_call(Inst i) {
-        const auto helper_id = std::to_underlying(HelperID::try_sub_call);
         const std::int32_t callee_chunk_id = i.w;
         const std::int32_t callee_argc = i.s;
+
+        if (callee_chunk_id == m_old_chunk_id) {
+            if (callee_argc > 1) {
+                // ! If 2+ args exist, reverse the argument temporaries since the native stack grows downwards. Thus, the Value* locals ptr must point to the current RSP, specifically the 1st of the reversed args.
+                for (
+                    // ? In the spirit of Leetcode 2-pointer problems, we can compile-time calculate and generate the swaps per Low-High index pair.
+                    std::int32_t higher_swap_off = callee_argc - 1, lower_swap_off = 0;
+                    lower_swap_off < higher_swap_off;
+                    higher_swap_off--, lower_swap_off++
+                ) {
+                    m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rsp, value_size * higher_swap_off));
+                    m_as.mov(x86::regs::r9, x86::ptr(x86::regs::rsp, value_size * lower_swap_off));
+                    m_as.mov(x86::ptr(x86::regs::rsp, value_size * higher_swap_off), x86::regs::r9);
+                    m_as.mov(x86::ptr(x86::regs::rsp, value_size * lower_swap_off), x86::regs::r8);
+                }
+            }
+
+            // ? In this special case, rdx and rcx are untouched. Value* cvp and Value* helpers don't need special handling here and will be restored when the sub-call completes.
+            m_as.mov(x86::regs::rsi, x86::regs::rsp);
+
+            // ! Call and then get resulting RAX of the caller (the same stub here).
+            m_as.call(m_self_label);
+
+            if (callee_argc > 0) {
+                m_as.add(x86::regs::rsp, callee_argc * value_size);
+            }
+
+            m_as.push(x86::regs::rax);
+
+            // ? Finally, restore the caller stub's original arguments after they've been dirtied by the callee.
+            m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
+            m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -2 * value_size));
+            m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -3 * value_size));
+            m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
+
+            return true;
+        }
+
+        const auto helper_id = std::to_underlying(HelperID::try_sub_call);
 
         // ? Form a pointer to N Values to feed the helper via `Value* a1`.
         m_as.lea(x86::regs::r9, x86::ptr(x86::regs::rsp, value_size * (callee_argc - 1)));
@@ -694,21 +739,17 @@ namespace toyjit::runtime {
         // ! BUT, the stack is LIFO and grows lower, so push argc before chunk-ID for the helper, allowing chunk-ID to reside in xa[0].
         // mov BYTE PTR [rsp], 2     ; put Value {.data.n = <argc>, .tag = VTag::v_i32}
         m_as.mov(x86::regs::r8, 2);
-        m_as.sub(x86::regs::rsp, value_union_size);
-        m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
+        m_as.push(x86::regs::r8d);
         // ; mov DWORD PTR [rsp], <argc>
         m_as.mov(x86::regs::r8, callee_argc);
-        m_as.sub(x86::regs::rsp, value_union_size);
-        m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d);
+        m_as.push(x86::regs::r8d);
 
         // mov BYTE PTR [rsp], 2     ; put Value {.data.n = <chunk-ID>, .tag = VTag::v_i32}
         m_as.mov(x86::regs::r8, 2);
-        m_as.sub(x86::regs::rsp, value_union_size);
-        m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
+        m_as.push(x86::regs::r8d);
         // ; mov DWORD PTR [rsp], <chunk-ID>
         m_as.mov(x86::regs::r8, callee_chunk_id);
-        m_as.sub(x86::regs::rsp, value_union_size);
-        m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d);
+        m_as.push(x86::regs::r8d);
 
         // ! Here, prepare `Value* xa` of Value[2].
         // mov r9, rcx
@@ -724,9 +765,8 @@ namespace toyjit::runtime {
         // call r9
         m_as.call(x86::regs::r9);
 
-        // ! Here, remove the used temporaries behind `Value* a1`.
-        m_as.add(x86::regs::rsp, 2 * value_size);
-        m_as.add(x86::regs::rsp, value_size * (callee_argc - 1));
+        // ! Here, remove the used temporaries behind `Value* a1`: the chunk-ID, argc, and N arguments.
+        m_as.add(x86::regs::rsp, value_size * (callee_argc + 1));
 
         // ! Here, restore the native stub's original arguments.
         m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));

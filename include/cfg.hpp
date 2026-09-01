@@ -17,7 +17,7 @@ namespace toyjit::compiler {
 
     /**
      * @brief Models a CFG over emitted bytecode, following these ideas:
-     * 1. A BB terminates a RPO traversal path if no children exist.
+     * 1. A BB terminates a RPO traversal path if no children exist OR the last Inst is `Op::ret`.
      * 2. A BB's truthy child is on the left.
      * 3. Ifs have a conditional block, T-block & F-block children, and a link from T-block to post-if BB's.
      * 4. Loops have a conditional block, general-T-block (body), and a link from body to post-loop BB's. No link back is needed for simplicity (keeping the traversal and jump patching simple).

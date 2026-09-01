@@ -45,6 +45,7 @@ namespace toyjit::runtime {
         std::vector<VTag> m_sim_stack {};           // Simulates VM stack state for types to ease choice of type specialized ASM ops.
         std::vector<std::int32_t> m_sim_bases {};   // Simulates "BP"s for the current BB's visited, offsetting into m_sim_stack / restored upon.
 
+        asmjit::Label m_self_label {};      // for marking a start of self-recursive functions e.g fib
         const compiler::CFG* m_cfg {};
         std::array<VTag, Profs::max_stub_arity> m_arg_types {};
         std::int32_t m_old_chunk_id {};

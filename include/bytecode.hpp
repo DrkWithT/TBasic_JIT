@@ -65,7 +65,8 @@ namespace toyjit::runtime {
     // ? Parameter Regs: rdi, rsi, rdx, rcx
     using HelperFn = void(*)(VM* vm, Value* dest, Value* a1, Value* xa);
 
-    // ? Interfaces with a piece of JITed or user-written native code. See README for usage and conventions. But `locals` is often & initially argument-locals at 1st. 
+    // ? Interfaces with a piece of JITed or user-written native code. See README for usage and conventions. But `locals` is often & initially argument-locals at 1st.
+    // ? Parameter Regs: rdi, rsi, rdx, rcx
     using StubFn = Value(*)(VM* vm, Value* locals, const Value* cvp, const HelperFn* helpers);
 
     // ? Tracks optimized JIT stub and its original, interpreted chunk ID (index). If a JIT attempts to JIT the same chunk, a quick cache lookup will find this same stub to use.
@@ -74,10 +75,6 @@ namespace toyjit::runtime {
         std::int32_t old_cid {-1}; // originally JITed chunk's index, but the chunk remains as bytecode to deopt to.
         std::uint16_t argc {};
         std::array<VTag, Profs::max_stub_arity> arg_types {};
-
-        explicit constexpr operator bool() const noexcept {
-            return f != nullptr && old_cid != -1;
-        }
     };
 
     // ? Named indexes to JIT glue functions (which help handle complex operations with any Value).
