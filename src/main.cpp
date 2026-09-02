@@ -20,7 +20,8 @@ constexpr std::array<runtime::HelperFn, static_cast<std::size_t>(runtime::Helper
     runtime::jit_ne_gen,
     runtime::jit_lt_gen,
     runtime::jit_gt_gen,
-    runtime::jit_try_sub_call
+    runtime::jit_try_sub_call,
+    runtime::jit_bailout_stub
 };
 
 int main() {

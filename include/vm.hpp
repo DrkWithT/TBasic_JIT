@@ -14,9 +14,18 @@
 
 
 namespace toyjit::runtime {
+    struct Snapshot {
+        const Inst* bailto_rip {};
+        const Value* bailto_cvp {};
+        std::int32_t bailto_cid {-1};
+        std::int32_t bailto_bp {};
+        std::int32_t bailto_sp {};
+    };
+
     struct VMFrame {
-        const runtime::Inst* old_rip {};
-        const runtime::Value* old_cvp {};
+        const Snapshot* snapshot {};
+        const Inst* old_rip {};
+        const Value* old_cvp {};
         std::uint32_t old_bp {};
         std::uint32_t self_bp {};
         std::int32_t curr_cid {-1};
@@ -49,6 +58,7 @@ namespace toyjit::runtime {
         std::vector<compiler::CFG> cfgs;        // CFG storage
         std::array<HelperFn, static_cast<std::size_t>(HelperID::last)> helpers; // JIT helper natives
         StubStore maybe_stub;       // none / reused stub result ID / prepared JIT stub
+        Snapshot snapshot;          // full-stub-deopt fallback info
         JIT* jit;                   // JIT utility ptr
         runtime::Program* pg;       // program ptr
         const runtime::Inst* ip;    // instruction pointer
@@ -60,10 +70,10 @@ namespace toyjit::runtime {
         std::uint16_t end_depth;
 
         constexpr VM(std::array<HelperFn, static_cast<std::size_t>(HelperID::last)> helpers_v, std::vector<compiler::CFG> cfg_list, JIT* jit_p, runtime::Program* program_p)
-        : stub_map {}, frames {}, stack (base_stack_max), stubs {}, cfgs (std::move(cfg_list)), helpers (std::move(helpers_v)), maybe_stub {}, jit {jit_p}, pg {program_p}, ip {}, cvp {}, bp {}, sp {}, cid {-1}, flags {static_cast<std::uint16_t>(VMFlags::vm_running)}, end_depth {} {
+        : stub_map {}, frames {}, stack (base_stack_max), stubs {}, cfgs (std::move(cfg_list)), helpers (std::move(helpers_v)), maybe_stub {}, snapshot {}, jit {jit_p}, pg {program_p}, ip {}, cvp {}, bp {}, sp {}, cid {-1}, flags {static_cast<std::uint16_t>(VMFlags::vm_running)}, end_depth {} {
             const auto program_main_chunk_id = pg->first_chunk_id;
 
-            frames.emplace_back(nullptr, nullptr, 0, 0, -1);
+            frames.emplace_back(nullptr, nullptr, nullptr, 0, 0, -1);
 
             ip = pg->chunks[program_main_chunk_id].bc.data();
             cvp = pg->chunks[program_main_chunk_id].konsts.data();
@@ -79,12 +89,21 @@ namespace toyjit::runtime {
         [[nodiscard]]
         constexpr Value sub_call(std::int32_t chunk_id, std::uint16_t argc) {
             const auto& chunk = pg->chunks[chunk_id];
+
+            // ? Skippable trampoline frames have a null snapshot-ptr (to indicate must-discard) during deopt.
             const Value* caller_cvp = chunk.konsts.data();
             const std::int32_t callee_bp = sp - argc + 1;
             const std::int32_t caller_bp = callee_bp;
             const std::uint16_t old_end_depth = end_depth;
   
-            frames.emplace_back(nullptr, caller_cvp, caller_bp, callee_bp, chunk_id);
+            frames.emplace_back(
+                nullptr, // ? no snapshot here.
+                nullptr,
+                caller_cvp,
+                caller_bp,
+                callee_bp,
+                chunk_id
+            );
             bp = callee_bp;
             ip = chunk.bc.data();
             cvp = caller_cvp;
@@ -99,11 +118,11 @@ namespace toyjit::runtime {
 
             Value result;
 
-            if (sub_call_was_ok) {
+            if (!sub_call_was_ok || stack[sp].tag == VTag::v_oops) {
+                result = Value::make_oops();
+            } else {
                 result = stack[sp + 1];
                 flags |= std::to_underlying(VMFlags::vm_running);
-            } else {
-                result = Value::make_oops();
             }
 
             return result;

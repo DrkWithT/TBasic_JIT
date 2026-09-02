@@ -6,7 +6,7 @@ namespace toyjit::runtime {
         auto& chunk_profile = pg->profiles[chunk_id];
 
         if (chunk_profile.chunk_id == Profs::dead_num) {
-            // ? 1. Is the chunk JIT-banned? It's probably done already.
+            // ? 1. Is the chunk JIT-banned? It's probably done already or deoptimized.
             return;
         }
 
@@ -55,11 +55,6 @@ namespace toyjit::runtime {
         auto jit_result = maybe_stub->get();
         std::vector<Inst> temp_trampoline_bc;
 
-        // ! IMPORTANT: emit all type guards in the trampoline's prefixing bytecode. This practically ensures that only specializable types hit this happy-path stub.
-        for (std::int32_t arg_local_idx = 0; arg_local_idx < jit_result.argc; arg_local_idx++) {
-            temp_trampoline_bc.emplace_back(arg_local_idx, 0, static_cast<std::uint8_t>(jit_result.arg_types[arg_local_idx]), Op::guard_arg_type);
-        }
-
         // ? Regular Case: retrieve freshly prepared JIT result...
         const std::int32_t next_stub_id = stubs.size();
         stubs.push_back(std::move(jit_result));
@@ -70,13 +65,12 @@ namespace toyjit::runtime {
 
         const std::int32_t trampoline_chunk_id = pg->chunks.size();
         const std::int32_t trampoline_prof_id = pg->profiles.size();
-        pg->chunks.push_back(Chunk {
-            .bc = std::move(temp_trampoline_bc),
-            // ! IMPORTANT: Clone the constant buffer to avoid use-after-moves for the original one.
-            .konsts = std::vector {pg->chunks[old_callee_chunk_id].konsts},
-            .cfg_id = -1,
-            .prof_id = trampoline_prof_id
-        });
+        pg->chunks.emplace_back(
+            std::move(temp_trampoline_bc),      // trampoline bytecode invoking the stub
+            std::vector {pg->chunks[old_callee_chunk_id].konsts}, // copied constants
+            -1,                     // no corresponding CFG ID
+            trampoline_prof_id      // dud profile ID
+        );
         pg->profiles.emplace_back(); // ? Trampolines have dead profile metadata to avoid bogus JITs.
 
         for (auto& chunk_code = pg->chunks[current_chunk_id].bc; auto& inst : chunk_code) {
@@ -303,12 +297,27 @@ namespace toyjit::runtime {
         const std::int32_t curr_chunk_id = vm->cid;
         const std::int32_t callee_chunk_id = vm->ip->w;
         const std::uint16_t callee_argc = vm->ip->s;
-        const std::int32_t callee_bp = vm->sp - callee_argc + 1;
         const std::int32_t caller_bp = vm->bp;
+        const std::int32_t callee_bp = vm->sp - callee_argc + 1;
+        const std::int32_t caller_sp = vm->sp;
         const Inst* caller_rip = vm->ip + 1;
         const Value* caller_cvp = vm->cvp;
         
-        vm->frames.emplace_back(caller_rip, caller_cvp, caller_bp, callee_bp, curr_chunk_id);
+        vm->snapshot = {
+            .bailto_rip = vm->ip,
+            .bailto_cvp = vm->cvp,
+            .bailto_cid = curr_chunk_id,
+            .bailto_bp = caller_bp,
+            .bailto_sp = caller_sp
+        };
+        vm->frames.emplace_back(
+            &vm->snapshot,
+            caller_rip,
+            caller_cvp,
+            caller_bp,
+            callee_bp,
+            curr_chunk_id
+        );
         vm->bp = callee_bp;
         vm->ip = vm->pg->chunks[callee_chunk_id].bc.data();
         vm->cvp = vm->pg->chunks[callee_chunk_id].konsts.data();
@@ -321,15 +330,18 @@ namespace toyjit::runtime {
         const std::int32_t native_id = vm->ip->w;
         const std::int32_t callee_bp = vm->bp; // ! BP is provided by the native trampoline which just passes the args as-is...
 
+        vm->frames.back().snapshot = nullptr; // ? Trampolines must be unwound if deoptimized (and more likely a JIT stub wrapper).
+
         Value v = vm->stubs[native_id].f(vm, stack + callee_bp, vm->cvp, vm->helpers.data());
 
+        // ? NOTE: The pre-stub VM state and the parent chunk's generic call sites could be restored by a deoptimization helper from the stub. Resume as usual.
         vm->sp++;
         stack[vm->sp] = v;
         vm->ip++;
     }
 
     void op_ret(VM* vm, Value* stack) {
-        const auto& [old_rip, old_cvp, caller_bp, callee_bp, callee_cid] = vm->frames.back();
+        const auto& [snapshot_ptr, old_rip, old_cvp, caller_bp, callee_bp, callee_cid] = vm->frames.back();
 
         stack[callee_bp] = stack[vm->sp];
         vm->sp = callee_bp;
@@ -345,19 +357,6 @@ namespace toyjit::runtime {
                 vm->flags = std::to_underlying(VMFlags::vm_ok);
             }
         }
-    }
-
-    void op_guard_arg_type(VM* vm, Value* stack) {
-        if (const auto& arg_ref = vm->stack[vm->bp + vm->ip->w]; arg_ref.tag != static_cast<VTag>(vm->ip->b)) {
-            vm->flags &= ~std::to_underlying(VMFlags::vm_running);
-            vm->sp++;
-            stack[vm->sp] = Value::make_oops();
-            vm->frames.pop_back();
-
-            return;
-        }
-
-        vm->ip++;
     }
 
     [[nodiscard]]
@@ -386,7 +385,6 @@ namespace toyjit::runtime {
                 case Op::call: op_call(vm, stack_data); break;
                 case Op::native_call: op_native_call(vm, stack_data); break;
                 case Op::ret: op_ret(vm, stack_data); break;
-                case Op::guard_arg_type: op_guard_arg_type(vm, stack_data); break;
                 default: return false;
             }
         }
