@@ -154,16 +154,47 @@ namespace toyjit::runtime {
         m_self_label = start_fn_label;
         m_as.bind(start_fn_label);
 
+        // ; save unresolved deopt label...
+        m_deopt_label = m_as.new_label();
+
         // ; set up stack frame
-        // push rbp
         m_as.push(x86::regs::rbp);
-        // mov rbp, rsp
         m_as.mov(x86::regs::rbp, x86::regs::rsp);
+
         // ! Here, preserve copies of the parameters' register data for this NativeFn stub: VM* vm, Value* locals, const Value* cvp, const HelperFn* helpers are RDI, RSI, RDX, RCX. RDI is left the same anyways.
         m_as.push(x86::regs::rdi);
         m_as.push(x86::regs::rsi);
         m_as.push(x86::regs::rdx);
         m_as.push(x86::regs::rcx);
+    }
+
+    void JIT::emit_deopt_area() {
+        m_as.bind(m_deopt_label);
+
+        const auto helper_id = std::to_underlying(HelperID::bailout_stub);
+
+        // ? Note: dest has no-init but will be an "oops" Value
+        m_as.sub(x86::regs::rsp, value_size);
+        m_as.mov(x86::regs::rsi, x86::regs::rsp); // <-- `Value* dest`
+
+        // ? RDI is preserved and restored, so it's ok to access `VM* vm` from the helper.
+        m_as.mov(x86::regs::r9, x86::ptr(x86::regs::rcx, helper_id * ptr_size));
+        m_as.call(x86::regs::r9);
+
+        // ? Return "oops" Value to signal deopt to callers if any.
+        m_as.bind(m_fast_ret_label); // ! Go here if an "oops" from deopt already began propogation.
+        m_as.pop(x86::regs::rax);
+
+        // ? Restore argument registers in case.
+        m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
+        m_as.mov(x86::regs::rsi, x86::ptr(x86::regs::rbp, -2 * value_size));
+        m_as.mov(x86::regs::rdx, x86::ptr(x86::regs::rbp, -3 * value_size));
+        m_as.mov(x86::regs::rcx, x86::ptr(x86::regs::rbp, -4 * value_size));
+
+        // ; collapse stack frame...
+        m_as.mov(x86::regs::rsp, x86::regs::rbp);
+        m_as.pop(x86::regs::rbp);
+        m_as.ret();
     }
 
     [[nodiscard]]
@@ -202,7 +233,6 @@ namespace toyjit::runtime {
             m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rbp, -(non_arg_local_offset + 5) * value_size)); // ! IMPORTANT: Use RBP + 5 to start the native non-arg locals above the 4 preserved parameters.
         }
 
-        // push r8
         m_as.push(x86::regs::r8);
 
         return true;
@@ -212,7 +242,6 @@ namespace toyjit::runtime {
     bool JIT::emit_set_local(Inst i) {
         const auto local_offset = i.w;
 
-        // pop r8
         m_as.pop(x86::regs::r8);
 
         if (local_offset < m_argc) {
@@ -221,7 +250,6 @@ namespace toyjit::runtime {
         } else {
             const auto non_arg_local_offset = local_offset - m_argc;
 
-            // mov [rbp + (-non_arg_local_offset) * 8], r8
             m_as.mov(x86::ptr(x86::regs::rbp, -(non_arg_local_offset + 5) * value_size), x86::regs::r8);
         }
 
@@ -238,7 +266,6 @@ namespace toyjit::runtime {
 
         // mov r8, [rdx + konst_offset * 8] ... Base.Index.Scale
         m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rdx, konst_offset * value_size));
-        // push r8
         m_as.push(x86::regs::r8);
 
         return true;
@@ -248,10 +275,7 @@ namespace toyjit::runtime {
     bool JIT::emit_dup([[maybe_unused]] Inst i) {
         update_sim_sp(i);
 
-        // mov r8, [rsp]
         m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rsp, 0));
-
-        // push r8
         m_as.push(x86::regs::r8);
 
         return true;
@@ -259,13 +283,9 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_swap([[maybe_unused]] Inst i) {
-        // mov r9, [rsp]
         m_as.mov(x86::regs::r9, x86::ptr(x86::regs::rsp, 0));
-        // mov r8, [rsp + 8]
         m_as.mov(x86::regs::r8, x86::ptr(x86::regs::rsp, value_size));
-        // mov [rsp + 8], r9
         m_as.mov(x86::ptr(x86::regs::rsp, value_size), x86::regs::r9);
-        // mov [rsp], r8
         m_as.mov(x86::ptr(x86::regs::rsp, 0), x86::regs::r8);
 
         update_sim_sp(i);
@@ -284,8 +304,18 @@ namespace toyjit::runtime {
 
     [[nodiscard]]
     bool JIT::emit_add(Inst i) {
-        // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
+        // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants. Still, emit type guards with deopt jumps anyways.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            // ! CHECK: <temp-rhs>.tag == v_i32
+            m_as.mov(x86::regs::r11b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r11b, 2);
+            m_as.jne(m_deopt_label);
+
+            // ! CHECK: <temp-lhs>.tag == vi32
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_size + value_union_size));
+            m_as.cmp(x86::regs::r10b, 2);
+            m_as.jne(m_deopt_label);
+
             m_as.pop(x86::regs::r8);
             m_as.add(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n += rhs->data.n;
 
@@ -298,18 +328,13 @@ namespace toyjit::runtime {
         const auto helper_id = std::to_underlying(HelperID::add_gen);
 
         // ; store `Value* target` (dest)
-        // lea rsi, [rsp + 8]
         m_as.lea(x86::regs::rsi, x86::ptr(x86::regs::rsp, value_size));
 
         // ; store `Value* a1` (src) Value ptr
-        // mov rdx, rsp
         m_as.mov(x86::regs::rdx, x86::regs::rsp);
 
         // ; call helper on these arguments...
-        // mov r9, [rcx + helper_id * 8]
         m_as.mov(x86::regs::r9, x86::ptr(x86::regs::rcx, helper_id * ptr_size));
-
-        // call r9
         m_as.call(x86::regs::r9);
 
         // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
@@ -328,6 +353,16 @@ namespace toyjit::runtime {
     bool JIT::emit_sub(Inst i) {
         // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            // ! CHECK: <temp-rhs>.tag == v_i32
+            m_as.mov(x86::regs::r11b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r11b, 2);
+            m_as.jne(m_deopt_label);
+
+            // ! CHECK: <temp-lhs>.tag == vi32
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_size + value_union_size));
+            m_as.cmp(x86::regs::r10b, 2);
+            m_as.jne(m_deopt_label);
+
             m_as.pop(x86::regs::r8);
             m_as.sub(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n -= rhs->data.n;
 
@@ -339,18 +374,13 @@ namespace toyjit::runtime {
         const auto helper_id = std::to_underlying(HelperID::sub_gen);
 
         // ; store `Value* target` (dest)
-        // lea rsi, [rsp + 8]
         m_as.lea(x86::regs::rsi, x86::ptr(x86::regs::rsp, value_size));
 
         // ; store `Value* a1` (src) Value ptr
-        // mov rdx, rsp
         m_as.mov(x86::regs::rdx, x86::regs::rsp);
 
         // ; call helper on these arguments...
-        // mov r9, [rcx + helper_id * 8]
         m_as.mov(x86::regs::r9, x86::ptr(x86::regs::rcx, helper_id * ptr_size));
-
-        // call r9
         m_as.call(x86::regs::r9);
 
         // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
@@ -369,6 +399,16 @@ namespace toyjit::runtime {
     bool JIT::emit_eq(Inst i) {
         // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            // ! CHECK: <temp-rhs>.tag == v_i32
+            m_as.mov(x86::regs::r11b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r11b, 2);
+            m_as.jne(m_deopt_label);
+
+            // ! CHECK: <temp-lhs>.tag == vi32
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_size + value_union_size));
+            m_as.cmp(x86::regs::r10b, 2);
+            m_as.jne(m_deopt_label);
+            
             m_as.mov(x86::regs::r9, 0); // ! temp_flag = false; until proven true
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
@@ -385,6 +425,16 @@ namespace toyjit::runtime {
 
             return true;
         } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
+            // ! CHECK: <temp-rhs>.tag == v_i32
+            m_as.mov(x86::regs::r11b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r11b, 1);
+            m_as.jne(m_deopt_label);
+
+            // ! CHECK: <temp-lhs>.tag == vi32
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_size + value_union_size));
+            m_as.cmp(x86::regs::r10b, 1);
+            m_as.jne(m_deopt_label);
+
             m_as.mov(x86::regs::r9, 0);
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
@@ -405,18 +455,13 @@ namespace toyjit::runtime {
         const auto helper_id = std::to_underlying(HelperID::eq_gen);
 
         // ; store `Value* target` (dest)
-        // lea rsi, [rsp + 8]
         m_as.lea(x86::regs::rsi, x86::ptr(x86::regs::rsp, value_size));
 
         // ; store `Value* a1` (src) Value ptr
-        // mov rdx, rsp
         m_as.mov(x86::regs::rdx, x86::regs::rsp);
 
         // ; call helper on these arguments...
-        // mov r9, [rcx + helper_id * 8]
         m_as.mov(x86::regs::r9, x86::ptr(x86::regs::rcx, helper_id * ptr_size));
-
-        // call r9
         m_as.call(x86::regs::r9);
 
         // ! Here, restore this callee's arg-local ptr and cvp ptr in RSI, RDX, RCX respectively. However, the `VM* vm` ptr in RDI stays the same.
@@ -435,6 +480,16 @@ namespace toyjit::runtime {
     bool JIT::emit_ne(Inst i) {
         // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            // ! CHECK: <temp-rhs>.tag == v_i32
+            m_as.mov(x86::regs::r11b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r11b, 2);
+            m_as.jne(m_deopt_label);
+
+            // ! CHECK: <temp-lhs>.tag == vi32
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_size + value_union_size));
+            m_as.cmp(x86::regs::r10b, 2);
+            m_as.jne(m_deopt_label);
+
             m_as.mov(x86::regs::r9, 0); // ! temp_flag = false; until proven true
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
@@ -451,6 +506,16 @@ namespace toyjit::runtime {
 
             return true;
         } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
+            // ! CHECK: <temp-rhs>.tag == v_i32
+            m_as.mov(x86::regs::r11b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r11b, 1);
+            m_as.jne(m_deopt_label);
+
+            // ! CHECK: <temp-lhs>.tag == vi32
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_size + value_union_size));
+            m_as.cmp(x86::regs::r10b, 1);
+            m_as.jne(m_deopt_label);
+
             m_as.mov(x86::regs::r9, 0);
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
@@ -502,6 +567,16 @@ namespace toyjit::runtime {
     bool JIT::emit_lt(Inst i) {
         // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            // ! CHECK: <temp-rhs>.tag == v_i32
+            m_as.mov(x86::regs::r11b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r11b, 2);
+            m_as.jne(m_deopt_label);
+
+            // ! CHECK: <temp-lhs>.tag == vi32
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_size + value_union_size));
+            m_as.cmp(x86::regs::r10b, 2);
+            m_as.jne(m_deopt_label);
+
             m_as.mov(x86::regs::r9, 0); // ! temp_flag = false; until proven true
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
@@ -518,6 +593,16 @@ namespace toyjit::runtime {
 
             return true;
         } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
+            // ! CHECK: <temp-rhs>.tag == v_i32
+            m_as.mov(x86::regs::r11b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r11b, 1);
+            m_as.jne(m_deopt_label);
+
+            // ! CHECK: <temp-lhs>.tag == vi32
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_size + value_union_size));
+            m_as.cmp(x86::regs::r10b, 1);
+            m_as.jne(m_deopt_label);
+
             m_as.mov(x86::regs::r9, 0);
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
@@ -568,6 +653,16 @@ namespace toyjit::runtime {
     bool JIT::emit_gt(Inst i) {
         // ? Here, handle the i32 specialization if both simulated operand types are i32. This is well known at runtime because the JIT was fed 0-4 Value args with type tagging & the CFG that refers to tagged chunk constants.
         if (m_sim_stack[m_sim_sp - 1] == VTag::v_i32 && m_sim_stack[m_sim_sp] == VTag::v_i32) {
+            // ! CHECK: <temp-rhs>.tag == v_i32
+            m_as.mov(x86::regs::r11b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r11b, 2);
+            m_as.jne(m_deopt_label);
+
+            // ! CHECK: <temp-lhs>.tag == vi32
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_size + value_union_size));
+            m_as.cmp(x86::regs::r10b, 2);
+            m_as.jne(m_deopt_label);
+
             m_as.mov(x86::regs::r9, 0); // ! temp_flag = false; until proven true
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8d); // lhs->data.n == rhs->data.n
@@ -584,6 +679,16 @@ namespace toyjit::runtime {
 
             return true;
         } else if (m_sim_stack[m_sim_sp - 1] == VTag::v_boolean && m_sim_stack[m_sim_sp] == VTag::v_boolean) {
+            // ! CHECK: <temp-rhs>.tag == v_i32
+            m_as.mov(x86::regs::r11b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r11b, 1);
+            m_as.jne(m_deopt_label);
+
+            // ! CHECK: <temp-lhs>.tag == vi32
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_size + value_union_size));
+            m_as.cmp(x86::regs::r10b, 1);
+            m_as.jne(m_deopt_label);
+
             m_as.mov(x86::regs::r9, 0);
             m_as.pop(x86::regs::r8);
             m_as.cmp(x86::ptr(x86::regs::rsp, 0), x86::regs::r8b);
@@ -713,7 +818,11 @@ namespace toyjit::runtime {
                 m_as.add(x86::regs::rsp, callee_argc * value_size);
             }
 
-            m_as.push(x86::regs::rax);
+            // ? Check for oops indicators from any deopts!
+            m_as.push(x86::regs::rax); // ? Re-push callee stub's result for correctness.
+            m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_union_size));
+            m_as.cmp(x86::regs::r10b, 5); // GUARD <temp>.tag != VTag::v_oops
+            m_as.je(m_fast_ret_label);
 
             // ? Finally, restore the caller stub's original arguments after they've been dirtied by the callee.
             m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
@@ -730,9 +839,7 @@ namespace toyjit::runtime {
         m_as.lea(x86::regs::r9, x86::ptr(x86::regs::rsp, value_size * (callee_argc - 1)));
 
         // ! Here, store `Value* target` (dest) which is equal to `Value* a1` in this specifc case since the invoke_cid helper needs N natively-passed args to push onto the VM stack for the cid's trampoline call with arg-locals.
-        // mov rsi, r9
         m_as.mov(x86::regs::rsi, x86::regs::r9);
-        // mov rdx, r9
         m_as.mov(x86::regs::rdx, x86::regs::r9);
 
         // ! Here, store a Value[2] behind `Value* xa` (src) Value ptr: chunk-ID and argc.
@@ -752,21 +859,24 @@ namespace toyjit::runtime {
         m_as.push(x86::regs::r8d);
 
         // ! Here, prepare `Value* xa` of Value[2].
-        // mov r9, rcx
         m_as.mov(x86::regs::r9, x86::regs::rcx); // ? Copy RCX ptr to helper functions ptr.
-        // mov rcx, rsp
         m_as.mov(x86::regs::rcx, x86::regs::rsp);
 
         // ; call helper on these arguments...
-        // mov r9, [r9 + helper_id * 8]
         m_as.mov(x86::regs::r9, x86::ptr(x86::regs::r9, helper_id * ptr_size));
 
         // ! Here, the invoke_cid() helper must take the chunk-ID and argc to properly call the chunk, 
-        // call r9
         m_as.call(x86::regs::r9);
 
         // ! Here, remove the used temporaries behind `Value* a1`: the chunk-ID, argc, and N arguments.
         m_as.add(x86::regs::rsp, value_size * (callee_argc + 1));
+
+        // ? Check for oops indicators from any deopts!
+        m_as.push(x86::regs::rax); // ? Re-push callee stub's result for correctness.
+        m_as.mov(x86::regs::r10b, x86::ptr(x86::regs::rsp, value_union_size));
+        m_as.cmp(x86::regs::r10b, 5); // GUARD <temp>.tag != VTag::v_oops
+        m_as.mov(x86::regs::rax, x86::ptr(x86::regs::rsi)); // ? Save result to RAX in case a fast-return of an "oops" is needed.
+        m_as.je(m_fast_ret_label);
 
         // ! Here, restore the native stub's original arguments.
         m_as.mov(x86::regs::rdi, x86::ptr(x86::regs::rbp, -value_size));
@@ -791,15 +901,10 @@ namespace toyjit::runtime {
     [[nodiscard]]
     bool JIT::emit_ret(Inst i) {
         // ; prepare return of temporary result in RAX...
-        // mov rax, [rsp]
-        m_as.mov(x86::regs::rax, x86::ptr(x86::regs::rsp, 0));
+        m_as.pop(x86::regs::rax);
 
         // ; collapse stack frame...
-        // mov rsp, rbp
         m_as.mov(x86::regs::rsp, x86::regs::rbp);
-
-        // ; restore caller RBP
-        // pop rbp
         m_as.pop(x86::regs::rbp);
         m_as.ret();
 
@@ -1113,9 +1218,12 @@ namespace toyjit::runtime {
             }
         }
 
+        emit_deopt_area();
+
         StubFn temp_f;
 
         if (auto gen_error = m_rt.add(&temp_f, &m_buf); gen_error != Error::kOk || !ok) {
+            m_rt.release(temp_f);
             return {};
         }
 

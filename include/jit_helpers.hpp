@@ -18,4 +18,7 @@ namespace toyjit::runtime {
 
     // ! IMPORTANT: Only use this for stub -> VM trampoline calls.
     void jit_try_sub_call(VM* vm, Value* dest, Value* a1, Value* xa);
+
+    // ! IMPORTANT: Only use this for calling in the deoptimization section of every stub's native code.
+    void jit_bailout_stub(VM* vm, Value* dest, Value* a1, Value* xa);
 }

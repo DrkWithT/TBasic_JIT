@@ -45,7 +45,9 @@ namespace toyjit::runtime {
         std::vector<VTag> m_sim_stack {};           // Simulates VM stack state for types to ease choice of type specialized ASM ops.
         std::vector<std::int32_t> m_sim_bases {};   // Simulates "BP"s for the current BB's visited, offsetting into m_sim_stack / restored upon.
 
-        asmjit::Label m_self_label {};      // for marking a start of self-recursive functions e.g fib
+        asmjit::Label m_self_label {};      // Marks start of self-recursive functions e.g fib.
+        asmjit::Label m_deopt_label {};     // Marks start of deoptimization logic in the stub which calls the `jit_bailout_stub` helper.
+        asmjit::Label m_fast_ret_label {};
         const compiler::CFG* m_cfg {};
         std::array<VTag, Profs::max_stub_arity> m_arg_types {};
         std::int32_t m_old_chunk_id {};
@@ -68,6 +70,7 @@ namespace toyjit::runtime {
         bool update_sim_sp(Inst i);
 
         void emit_prelude();
+        void emit_deopt_area();
 
         [[nodiscard]]
         bool emit_nop([[maybe_unused]] Inst i);
@@ -158,6 +161,11 @@ namespace toyjit::runtime {
             m_sim_stack.reserve(sim_stack_size);
             m_sim_stack.resize(sim_stack_size);
             m_sim_bases.push_back(0);
+        }
+
+        [[nodiscard]]
+        constexpr asmjit::JitRuntime& runtime() noexcept {
+            return m_rt;
         }
 
         [[nodiscard]]

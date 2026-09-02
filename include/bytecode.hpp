@@ -26,7 +26,6 @@ namespace toyjit::runtime {
         call,
         native_call,
         ret,
-        guard_arg_type,
         last
     };
 
@@ -88,6 +87,7 @@ namespace toyjit::runtime {
         lt_gen,
         gt_gen,
         try_sub_call,
+        bailout_stub,
         last
     };
 }
